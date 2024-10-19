@@ -28,8 +28,12 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
 
+import org.ojalgo.concurrent.DaemonPoolExecutor;
 import org.ojalgo.function.constant.BigMath;
 import org.ojalgo.netio.ASCII;
 import org.ojalgo.optimisation.ExpressionsBasedModel;
@@ -61,6 +65,8 @@ public final class OptModel {
         void receive(BigDecimal value);
 
     }
+
+    private static final ScheduledExecutorService EXECUTOR = DaemonPoolExecutor.newScheduledThreadPool("", 1);
 
     private static OptimisationService.Integration INTEGRATION = null;
 
@@ -163,12 +169,29 @@ public final class OptModel {
         myObjective = new OptObjective(delegate);
     }
 
-    public OptResult maximise() {
-        return this.handle(myDelegate.maximise());
+    public Future<OptResult> maximise() {
+
+        CompletableFuture<OptResult> future = new CompletableFuture<>();
+
+        EXECUTOR.execute(() -> {
+            future.complete(this.handle(myDelegate.maximise()));
+        });
+
+        return future;
     }
 
-    public OptResult minimise() {
-        return this.handle(myDelegate.minimise());
+
+
+    public Future<OptResult> minimise() {
+
+        CompletableFuture<OptResult> future = new CompletableFuture<>();
+
+        EXECUTOR.execute(() -> {
+            future.complete(this.handle(myDelegate.minimise()));
+        });
+
+        return future;
+
     }
 
     public OptVariable.BinaryVariable newBinaryVariable() {

@@ -1,6 +1,7 @@
 package se.optimatika.optimisation.service.client;
 
 import java.net.URI;
+import java.util.concurrent.ExecutionException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -9,8 +10,8 @@ import org.ojalgo.optimisation.ExpressionsBasedModel;
 
 public class OptimisationServiceClientTest {
 
-    private static final String HOST = "http://13.60.238.124:8080";
-    // private static final String HOST = "http://localhost:8080";
+    // private static final String HOST = "http://13.60.238.124:8080";
+    private static final String HOST = "http://localhost:8080";
     // private static final String HOST = "http://test-service.optimatika.se:8080";
 
     static final boolean DEBUG = false;
@@ -29,7 +30,7 @@ public class OptimisationServiceClientTest {
     }
 
     @Test
-    public void testVeryBasicModel() {
+    public void testVeryBasicModel() throws InterruptedException, ExecutionException {
 
         OptModel.configure(URI.create(HOST));
 
@@ -42,11 +43,11 @@ public class OptimisationServiceClientTest {
 
         model.objective().set(varA, 10).set(varB, -10);
 
-        TestUtils.assertTrue(model.maximise().isOptimal());
+        TestUtils.assertTrue(model.maximise().get().isOptimal());
         TestUtils.assertEquals(2.0, varA.doubleValue());
         TestUtils.assertEquals(0.0, varB.doubleValue());
 
-        TestUtils.assertTrue(model.minimise().isOptimal());
+        TestUtils.assertTrue(model.minimise().get().isOptimal());
         TestUtils.assertEquals(0.0, varA.doubleValue());
         TestUtils.assertEquals(2.0, varB.doubleValue());
     }
