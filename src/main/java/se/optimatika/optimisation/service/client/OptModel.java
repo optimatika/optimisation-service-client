@@ -25,19 +25,27 @@ import java.io.File;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import org.ojalgo.concurrent.DaemonPoolExecutor;
 import org.ojalgo.function.constant.BigMath;
 import org.ojalgo.netio.ASCII;
+import org.ojalgo.netio.InMemoryFile;
+import org.ojalgo.netio.ResourceLocator.Method;
+import org.ojalgo.netio.ServiceClient;
+import org.ojalgo.netio.ServiceClient.Request;
+import org.ojalgo.netio.ServiceClient.Session;
 import org.ojalgo.optimisation.ExpressionsBasedModel;
 import org.ojalgo.optimisation.Optimisation.Result;
+import org.ojalgo.optimisation.Optimisation.Sense;
 import org.ojalgo.optimisation.Optimisation.State;
 import org.ojalgo.optimisation.Variable;
 import org.ojalgo.optimisation.service.OptimisationService;
@@ -66,7 +74,7 @@ public final class OptModel {
 
     }
 
-    private static final ScheduledExecutorService EXECUTOR = DaemonPoolExecutor.newScheduledThreadPool("", 1);
+    private static final ExecutorService EXECUTOR = DaemonPoolExecutor.newCachedThreadPool("opt-serv");
 
     private static OptimisationService.Integration INTEGRATION = null;
 
@@ -170,28 +178,11 @@ public final class OptModel {
     }
 
     public Future<OptResult> maximise() {
-
-        CompletableFuture<OptResult> future = new CompletableFuture<>();
-
-        EXECUTOR.execute(() -> {
-            future.complete(this.handle(myDelegate.maximise()));
-        });
-
-        return future;
+        return this.optimise(Sense.MAX);
     }
 
-
-
     public Future<OptResult> minimise() {
-
-        CompletableFuture<OptResult> future = new CompletableFuture<>();
-
-        EXECUTOR.execute(() -> {
-            future.complete(this.handle(myDelegate.minimise()));
-        });
-
-        return future;
-
+        return this.optimise(Sense.MIN);
     }
 
     public OptVariable.BinaryVariable newBinaryVariable() {
@@ -290,18 +281,87 @@ public final class OptModel {
         boolean optimal = state.isFeasible();
         BigDecimal value = REAL.toBigDecimal(result.getValue());
 
-        if (feasible && myConsumers.size() > 0 && result.size() == myDelegate.countVariables()) {
+        if (feasible && result.size() == myDelegate.countVariables()) {
             for (int i = 0, limit = result.size(); i < limit; i++) {
                 Variable variable = myDelegate.getVariable(i);
+                BigDecimal value2 = result.get(i);
+                variable.setValue(value2);
                 String name = variable.getName();
                 Consumer<BigDecimal> consumer = myConsumers.get(name);
                 if (consumer != null) {
-                    consumer.accept(variable.getValue());
+                    consumer.accept(value2);
                 }
             }
         }
 
         return new OptResult(feasible, optimal, value);
+    }
+
+    Future<OptResult> optimise(final Sense sense) {
+
+        AtomicLong counter = new AtomicLong();
+
+        CompletableFuture<OptResult> future = new CompletableFuture<>();
+
+        EXECUTOR.execute(() -> {
+
+            InMemoryFile file = new InMemoryFile();
+
+            Session session = ServiceClient.newSession();
+
+            String url = "http://localhost:8080/optimisation/v01/put-on-queue/EBM/" + sense.name();
+
+            Request request = session.newRequest(url).header("Accept", "application/json");
+
+            myDelegate.simplify().writeTo(file);
+            request.method(Method.POST).body(file.getContentsAsByteArray());
+
+            String response = request.send(BodyHandlers.ofString()).getBody();
+            String key = this.parseKey(response);
+            String status = this.parseStatus(response);
+
+            while ("PENDING".equals(status)) {
+
+                try {
+                    Thread.sleep(1000L * counter.getAndIncrement());
+                } catch (InterruptedException cause) {
+                    throw new RuntimeException(cause);
+                }
+
+                String url2 = "http://localhost:8080/optimisation/v01/poll-result/" + key;
+
+                Request request2 = session.newRequest(url2).method(Method.GET).header("Accept", "application/json");
+
+                response = request2.send(BodyHandlers.ofString()).getBody();
+
+                status = this.parseStatus(response);
+            }
+
+            String result2 = this.parseResult(response);
+            Result result = Result.parse(result2);
+            OptResult handle = this.handle(result);
+            future.complete(handle);
+        });
+
+        return future;
+    }
+
+    String parseKey(final String response) {
+        int beginIndex = response.indexOf("key") + 6;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
+    }
+
+    String parseResult(final String response) {
+        int beginIndex = response.indexOf("result") + 9;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
+    }
+
+    String parseStatus(final String response) {
+        int beginIndex = response.indexOf("status") + 9;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
     }
 
 }
