@@ -1,7 +1,11 @@
 package se.optimatika.optimisation.service.client;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +54,28 @@ public class OptimisationServiceClientTest {
         TestUtils.assertTrue(model.minimise().get().isOptimal());
         TestUtils.assertEquals(0.0, varA.doubleValue());
         TestUtils.assertEquals(2.0, varB.doubleValue());
+    }
+
+    @Test
+    public void testMIP() {
+
+        OptModel.configure(URI.create(HOST));
+
+        try (InputStream input = TestUtils.getResource("optimisation", "miplib", "markshare_4_0.mps")) {
+
+            OptModel model = OptModel.parse(input, ExpressionsBasedModel.FileFormat.MPS);
+
+            Future<OptResult> minimise = model.minimise();
+
+            OptResult result = minimise.get();
+
+            TestUtils.assertEquals(true, result.isFeasible());
+            TestUtils.assertEquals(true, result.isOptimal());
+            TestUtils.assertEquals(BigDecimal.ONE, result.getValue());
+
+        } catch (IOException | InterruptedException | ExecutionException cause) {
+            TestUtils.fail(cause);
+        }
     }
 
 }

@@ -22,6 +22,7 @@
 package se.optimatika.optimisation.service.client;
 
 import java.io.File;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -44,6 +45,7 @@ import org.ojalgo.netio.ServiceClient;
 import org.ojalgo.netio.ServiceClient.Request;
 import org.ojalgo.netio.ServiceClient.Session;
 import org.ojalgo.optimisation.ExpressionsBasedModel;
+import org.ojalgo.optimisation.ExpressionsBasedModel.FileFormat;
 import org.ojalgo.optimisation.Optimisation.Result;
 import org.ojalgo.optimisation.Optimisation.Sense;
 import org.ojalgo.optimisation.Optimisation.State;
@@ -140,6 +142,13 @@ public final class OptModel {
     static OptModel parse(final File file) {
 
         ExpressionsBasedModel ebm = ExpressionsBasedModel.parse(file);
+
+        return new OptModel(ebm);
+    }
+
+    static OptModel parse(final InputStream input, final FileFormat format) {
+
+        ExpressionsBasedModel ebm = ExpressionsBasedModel.parse(input, format);
 
         return new OptModel(ebm);
     }
