@@ -39,6 +39,7 @@ import java.util.function.Consumer;
 import org.ojalgo.concurrent.DaemonPoolExecutor;
 import org.ojalgo.function.constant.BigMath;
 import org.ojalgo.netio.ASCII;
+import org.ojalgo.netio.BasicLogger;
 import org.ojalgo.netio.InMemoryFile;
 import org.ojalgo.netio.ResourceLocator.Method;
 import org.ojalgo.netio.ServiceClient;
@@ -51,6 +52,8 @@ import org.ojalgo.optimisation.Optimisation.Sense;
 import org.ojalgo.optimisation.Optimisation.State;
 import org.ojalgo.optimisation.Variable;
 import org.ojalgo.optimisation.service.OptimisationService;
+import org.ojalgo.type.CalendarDateUnit;
+import org.ojalgo.type.Stopwatch;
 import org.ojalgo.type.context.NumberContext;
 
 public final class OptModel {
@@ -93,6 +96,10 @@ public final class OptModel {
 
     public static boolean isServiceAvailable() {
         return INTEGRATION != null && INTEGRATION.test();
+    }
+
+    public static String getServiceEnvironment() {
+        return INTEGRATION != null ? INTEGRATION.getEnvironment() : "?";
     }
 
     private static String name() {
@@ -308,6 +315,8 @@ public final class OptModel {
 
     Future<OptResult> optimise(final Sense sense) {
 
+        Stopwatch stopwatch = new Stopwatch();
+
         AtomicLong counter = new AtomicLong();
 
         CompletableFuture<OptResult> future = new CompletableFuture<>();
@@ -344,12 +353,16 @@ public final class OptModel {
                 response = request2.send(BodyHandlers.ofString()).getBody();
 
                 status = this.parseStatus(response);
+
+                BasicLogger.debug("Status check: {}", stopwatch.stop(CalendarDateUnit.SECOND));
             }
 
             String result2 = this.parseResult(response);
             Result result = Result.parse(result2);
             OptResult handle = this.handle(result);
             future.complete(handle);
+
+            BasicLogger.debug("Done: {}", stopwatch.stop(CalendarDateUnit.SECOND));
         });
 
         return future;

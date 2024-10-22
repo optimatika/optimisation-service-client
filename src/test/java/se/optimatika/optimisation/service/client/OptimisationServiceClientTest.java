@@ -10,6 +10,7 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.ojalgo.TestUtils;
+import org.ojalgo.netio.BasicLogger;
 import org.ojalgo.optimisation.ExpressionsBasedModel;
 
 public class OptimisationServiceClientTest {
@@ -31,6 +32,8 @@ public class OptimisationServiceClientTest {
         OptModel.configure(URI.create(HOST));
 
         TestUtils.assertTrue(OptModel.isServiceAvailable());
+
+        BasicLogger.debug(OptModel.getServiceEnvironment());
     }
 
     @Test
@@ -72,6 +75,28 @@ public class OptimisationServiceClientTest {
             TestUtils.assertEquals(true, result.isFeasible());
             TestUtils.assertEquals(true, result.isOptimal());
             TestUtils.assertEquals(BigDecimal.ONE, result.getValue());
+
+        } catch (IOException | InterruptedException | ExecutionException cause) {
+            TestUtils.fail(cause);
+        }
+    }
+
+    @Test
+    public void testMIP2() {
+
+        OptModel.configure(URI.create(HOST));
+
+        try (InputStream input = TestUtils.getResource("optimisation", "miplib", "pk1.mps")) {
+
+            OptModel model = OptModel.parse(input, ExpressionsBasedModel.FileFormat.MPS);
+
+            Future<OptResult> minimise = model.minimise();
+
+            OptResult result = minimise.get();
+
+            TestUtils.assertEquals(true, result.isFeasible());
+            TestUtils.assertEquals(true, result.isOptimal());
+            TestUtils.assertEquals(BigDecimal.TEN.add(BigDecimal.ONE), result.getValue());
 
         } catch (IOException | InterruptedException | ExecutionException cause) {
             TestUtils.fail(cause);
