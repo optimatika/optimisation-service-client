@@ -83,23 +83,35 @@ public final class OptModel {
 
     private static OptimisationService.Integration INTEGRATION = null;
 
+    private static final String POLL_RESULT = "/optimisation/v01/poll-result/";
+    private static final String PUT_ON_QUEUE = "/optimisation/v01/put-on-queue/EBM/";
     private static final NumberContext REAL = NumberContext.of(12);
+
+    private static String SERVICE_HOST = null;
 
     public static void configure(final URI host) {
 
+        Objects.requireNonNull(host);
+
+        if (host.getPath().length() > 0) {
+            throw new IllegalArgumentException("The URI path must be empty!");
+        }
+
+        SERVICE_HOST = host.toASCIIString();
+
         ExpressionsBasedModel.clearIntegrations();
 
-        INTEGRATION = OptimisationService.newIntegration(host.toASCIIString());
+        INTEGRATION = OptimisationService.newIntegration(SERVICE_HOST);
 
         ExpressionsBasedModel.addIntegration(INTEGRATION);
     }
 
-    public static boolean isServiceAvailable() {
-        return INTEGRATION != null && INTEGRATION.test();
-    }
-
     public static String getServiceEnvironment() {
         return INTEGRATION != null ? INTEGRATION.getEnvironment() : "?";
+    }
+
+    public static boolean isServiceAvailable() {
+        return INTEGRATION != null && INTEGRATION.test();
     }
 
     private static String name() {
@@ -261,6 +273,10 @@ public final class OptModel {
         return myObjective;
     }
 
+    public OptModel simplify() {
+        return new OptModel(myDelegate.simplify());
+    }
+
     @Override
     public String toString() {
         return myDelegate.toString();
@@ -315,8 +331,11 @@ public final class OptModel {
 
     Future<OptResult> optimise(final Sense sense) {
 
-        Stopwatch stopwatch = new Stopwatch();
+        if (SERVICE_HOST == null) {
+            throw new IllegalStateException("Service host not configured!");
+        }
 
+        Stopwatch stopwatch = new Stopwatch();
         AtomicLong counter = new AtomicLong();
 
         CompletableFuture<OptResult> future = new CompletableFuture<>();
@@ -324,15 +343,11 @@ public final class OptModel {
         EXECUTOR.execute(() -> {
 
             InMemoryFile file = new InMemoryFile();
+            myDelegate.writeTo(file);
 
             Session session = ServiceClient.newSession();
 
-            String url = "http://localhost:8080/optimisation/v01/put-on-queue/EBM/" + sense.name();
-
-            Request request = session.newRequest(url).header("Accept", "application/json");
-
-            myDelegate.simplify().writeTo(file);
-            request.method(Method.POST).body(file.getContentsAsByteArray());
+            Request request = session.newRequest(SERVICE_HOST + PUT_ON_QUEUE + sense).method(Method.POST).body(file.getContentsAsByteArray());
 
             String response = request.send(BodyHandlers.ofString()).getBody();
             String key = this.parseKey(response);
@@ -346,21 +361,16 @@ public final class OptModel {
                     throw new RuntimeException(cause);
                 }
 
-                String url2 = "http://localhost:8080/optimisation/v01/poll-result/" + key;
+                request = session.newRequest(SERVICE_HOST + POLL_RESULT + key).method(Method.GET);
 
-                Request request2 = session.newRequest(url2).method(Method.GET).header("Accept", "application/json");
-
-                response = request2.send(BodyHandlers.ofString()).getBody();
-
+                response = request.send(BodyHandlers.ofString()).getBody();
                 status = this.parseStatus(response);
 
                 BasicLogger.debug("Status check: {}", stopwatch.stop(CalendarDateUnit.SECOND));
             }
 
-            String result2 = this.parseResult(response);
-            Result result = Result.parse(result2);
-            OptResult handle = this.handle(result);
-            future.complete(handle);
+            OptResult result = this.handle(Result.parse(this.parseResult(response)));
+            future.complete(result);
 
             BasicLogger.debug("Done: {}", stopwatch.stop(CalendarDateUnit.SECOND));
         });
