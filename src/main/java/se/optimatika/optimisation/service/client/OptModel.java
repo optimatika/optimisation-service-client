@@ -387,7 +387,9 @@ public final class OptModel {
                 BasicLogger.debug("Status check: {}", stopwatch.stop(CalendarDateUnit.SECOND));
             }
 
-            OptResult result = this.handle(Result.parse(this.extractResult(response)));
+            String extracted = this.extractResult(response);
+            Result parsed = Result.parse(extracted);
+            OptResult result = this.handle(parsed);
             future.complete(result);
 
             BasicLogger.debug("Done: {}", stopwatch.stop(CalendarDateUnit.SECOND));
