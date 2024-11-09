@@ -59,8 +59,11 @@ public class OptimisationServiceClientTest {
         TestUtils.assertEquals(2.0, varB.doubleValue());
     }
 
+    /**
+     * 20s
+     */
     @Test
-    public void testMIP() {
+    public void testMarkshare4() {
 
         OptModel.configure(URI.create(HOST));
 
@@ -81,8 +84,11 @@ public class OptimisationServiceClientTest {
         }
     }
 
+    /**
+     * 1 min
+     */
     @Test
-    public void testMIP2() {
+    public void testPK1() {
 
         OptModel.configure(URI.create(HOST));
 
