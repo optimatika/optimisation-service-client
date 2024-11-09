@@ -329,6 +329,24 @@ public final class OptModel {
         return new OptResult(feasible, optimal, value);
     }
 
+    String extractKey(final String response) {
+        int beginIndex = response.indexOf("key") + 6;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
+    }
+
+    String extractResult(final String response) {
+        int beginIndex = response.indexOf("result") + 9;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
+    }
+
+    String extractStatus(final String response) {
+        int beginIndex = response.indexOf("status") + 9;
+        int endIndex = response.indexOf("\"", beginIndex);
+        return response.substring(beginIndex, endIndex);
+    }
+
     Future<OptResult> optimise(final Sense sense) {
 
         if (SERVICE_HOST == null) {
@@ -350,8 +368,8 @@ public final class OptModel {
             Request request = session.newRequest(SERVICE_HOST + PUT_ON_QUEUE + sense).method(Method.POST).body(file.getContentsAsByteArray());
 
             String response = request.send(BodyHandlers.ofString()).getBody();
-            String key = this.parseKey(response);
-            String status = this.parseStatus(response);
+            String key = this.extractKey(response);
+            String status = this.extractStatus(response);
 
             while ("PENDING".equals(status)) {
 
@@ -364,36 +382,18 @@ public final class OptModel {
                 request = session.newRequest(SERVICE_HOST + POLL_RESULT + key).method(Method.GET);
 
                 response = request.send(BodyHandlers.ofString()).getBody();
-                status = this.parseStatus(response);
+                status = this.extractStatus(response);
 
                 BasicLogger.debug("Status check: {}", stopwatch.stop(CalendarDateUnit.SECOND));
             }
 
-            OptResult result = this.handle(Result.parse(this.parseResult(response)));
+            OptResult result = this.handle(Result.parse(this.extractResult(response)));
             future.complete(result);
 
             BasicLogger.debug("Done: {}", stopwatch.stop(CalendarDateUnit.SECOND));
         });
 
         return future;
-    }
-
-    String parseKey(final String response) {
-        int beginIndex = response.indexOf("key") + 6;
-        int endIndex = response.indexOf("\"", beginIndex);
-        return response.substring(beginIndex, endIndex);
-    }
-
-    String parseResult(final String response) {
-        int beginIndex = response.indexOf("result") + 9;
-        int endIndex = response.indexOf("\"", beginIndex);
-        return response.substring(beginIndex, endIndex);
-    }
-
-    String parseStatus(final String response) {
-        int beginIndex = response.indexOf("status") + 9;
-        int endIndex = response.indexOf("\"", beginIndex);
-        return response.substring(beginIndex, endIndex);
     }
 
 }
