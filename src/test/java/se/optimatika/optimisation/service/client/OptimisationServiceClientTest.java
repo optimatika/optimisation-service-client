@@ -15,7 +15,7 @@ import org.ojalgo.optimisation.ExpressionsBasedModel;
 
 public class OptimisationServiceClientTest {
 
-    private static final String HOST = "http://13.60.211.210:8080";
+    private static final String HOST = "http://16.16.99.66:8080";
     // private static final String HOST = "http://localhost:8080";
     // private static final String HOST = "http://test-service.optimatika.se:8080";
 
