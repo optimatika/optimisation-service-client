@@ -51,7 +51,7 @@ import org.ojalgo.optimisation.Optimisation.Result;
 import org.ojalgo.optimisation.Optimisation.Sense;
 import org.ojalgo.optimisation.Optimisation.State;
 import org.ojalgo.optimisation.Variable;
-import org.ojalgo.optimisation.service.OptimisationService;
+import org.ojalgo.optimisation.service.ServiceIntegration;
 import org.ojalgo.type.CalendarDateUnit;
 import org.ojalgo.type.Stopwatch;
 import org.ojalgo.type.context.NumberContext;
@@ -81,7 +81,7 @@ public final class OptModel {
 
     private static final ExecutorService EXECUTOR = DaemonPoolExecutor.newCachedThreadPool("opt-serv");
 
-    private static OptimisationService.Integration INTEGRATION = null;
+    private static ServiceIntegration INTEGRATION = null;
 
     private static final String POLL_RESULT = "/optimisation/v01/poll-result/";
     private static final String PUT_ON_QUEUE = "/optimisation/v01/put-on-queue/EBM/";
@@ -101,7 +101,7 @@ public final class OptModel {
 
         ExpressionsBasedModel.clearIntegrations();
 
-        INTEGRATION = OptimisationService.newIntegration(SERVICE_HOST);
+        INTEGRATION = ServiceIntegration.newInstance(SERVICE_HOST);
 
         ExpressionsBasedModel.addIntegration(INTEGRATION);
     }
