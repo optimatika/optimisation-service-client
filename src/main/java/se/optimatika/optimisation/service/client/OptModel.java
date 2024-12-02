@@ -374,7 +374,7 @@ public final class OptModel {
             while ("PENDING".equals(status)) {
 
                 try {
-                    Thread.sleep(1000L * counter.getAndIncrement());
+                    Thread.sleep(Math.min(10_000L, 100L * counter.incrementAndGet()));
                 } catch (InterruptedException cause) {
                     throw new RuntimeException(cause);
                 }
