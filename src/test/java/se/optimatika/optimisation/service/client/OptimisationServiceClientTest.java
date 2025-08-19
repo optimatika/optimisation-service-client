@@ -16,11 +16,10 @@ import org.ojalgo.optimisation.ExpressionsBasedModel;
 
 public class OptimisationServiceClientTest {
 
-
     // private static final String HOST = "http://optimatika-service-296829693201.europe-north1.run.app";
     // private static final String HOST = "http://16.16.99.66:8080";
-    // private static final String HOST = "http://localhost:8080";
-    private static final String HOST = "https://optimatika-boot-services-969062758986.europe-north1.run.app";
+    private static final String HOST = "http://localhost:8080";
+    //private static final String HOST = "https://optimatika-boot-services-969062758986.europe-north1.run.app";
     //private static final String HOST = "https://test-service.optimatika.se";
 
     static final boolean DEBUG = false;
