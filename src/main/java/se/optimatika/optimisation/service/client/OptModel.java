@@ -1,8 +1,10 @@
 package se.optimatika.optimisation.service.client;
 
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -18,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -30,13 +33,13 @@ import java.util.function.Consumer;
  * server and obtain a {@link Future} that completes with the {@link OptResult}.
  * <p>
  * The model is serialised to the EBM (Expression-Based Model) format and sent to the server via
- * {@link OptClientV01}. The server solves the model and the result is polled asynchronously. On completion,
+ * {@link OptClientV1}. The server solves the model and the result is polled asynchronously. On completion,
  * solution values are written back to the variables and any registered value receivers are notified.
  * <p>
- * You create instances by first creating a {@link OptClientV01} and then calling
- * {@link OptClientV01#newModel()}.
+ * You create instances by first creating a {@link OptClientV1} and then calling
+ * {@link OptClientV1#newModel()}.
  *
- * @see OptClientV01
+ * @see OptClientV1
  */
 public final class OptModel {
 
@@ -61,6 +64,79 @@ public final class OptModel {
     public interface RealReceiver {
 
         void receive(BigDecimal value);
+
+    }
+
+    /**
+     * The {@link Future} returned by {@link OptModel#minimise()} and {@link OptModel#maximise()}.
+     * <p>
+     * {@link #cancel(boolean)} with {@code mayInterruptIfRunning} set abandons the solve on the server as
+     * well as locally, the way {@link OptClientV1#abort(String)} does. Without it only the local side is
+     * abandoned: polling stops and the {@link Future} reports cancelled, but the server carries on solving.
+     * That is the usual reading of the flag – leave a task that has already started alone – but note that the
+     * queue key is not exposed here, so a solve left running that way cannot be reached again.
+     * <p>
+     * Cancelling before the model has even been submitted works too: the abort is sent as soon as the server
+     * hands back a key.
+     */
+    private static final class RemoteSolve extends CompletableFuture<OptResult> {
+
+        private final AtomicBoolean myAbortSent = new AtomicBoolean(false);
+        private volatile boolean myAbortWanted = false;
+        private final OptClientV1 myClient;
+        private volatile String myKey = null;
+        private volatile Thread myPoller = null;
+
+        RemoteSolve(final OptClientV1 client) {
+            super();
+            myClient = client;
+        }
+
+        @Override
+        public boolean cancel(final boolean mayInterruptIfRunning) {
+
+            boolean retVal = super.cancel(mayInterruptIfRunning);
+
+            if (mayInterruptIfRunning) {
+
+                myAbortWanted = true;
+                this.abortRemote();
+
+                // Wakes the poll loop out of its sleep, which can be 10s long, rather than leaving a thread
+                // to notice the cancellation whenever it next happens to look. Null until the model has been
+                // submitted, because interrupting that would lose the key to a solve the server had already
+                // accepted – such a cancellation is carried by myAbortWanted instead, and sent as an abort
+                // the moment the key arrives.
+                Thread poller = myPoller;
+                if (poller != null) {
+                    poller.interrupt();
+                }
+            }
+
+            return retVal;
+        }
+
+        /**
+         * Sends the abort, once, and only once both halves are in place – something has asked for it, and the
+         * server has given us a key to name. Called from both sides because either can be the last to arrive.
+         */
+        private void abortRemote() {
+
+            String key = myKey;
+
+            if (myAbortWanted && key != null && myAbortSent.compareAndSet(false, true)) {
+                myClient.abortParsed(key);
+            }
+        }
+
+        void setKey(final String key) {
+            myKey = key;
+            this.abortRemote();
+        }
+
+        void setPoller(final Thread poller) {
+            myPoller = poller;
+        }
 
     }
 
@@ -149,21 +225,44 @@ public final class OptModel {
         return BigDecimal.valueOf(value);
     }
 
-    private final OptClientV01 myClient;
+    private final OptClientV1 myClient;
     private final Map<String, Consumer<BigDecimal>> myConsumers = new HashMap<>();
     private final List<OptExpression> myExpressions = new ArrayList<>();
     private final OptObjective myObjective;
     private final List<OptVariable> myVariables = new ArrayList<>();
 
-    OptModel(final OptClientV01 client) {
+    OptModel(final OptClientV1 client) {
         super();
         myClient = Objects.requireNonNull(client);
         myObjective = new OptObjective(this);
     }
 
     /**
+     * Exports this model serialised in the specified file format.
+     *
+     * @param format the desired output format: {@code "EBM"}, {@code "LP"}, or {@code "MPS"}
+     * @return an {@link InputStream} containing the serialised model
+     */
+    public InputStream exportModel(final String format) {
+
+        byte[] input = this.toBytesOfEBM();
+        byte[] output;
+
+        if ("EBM".equalsIgnoreCase(format)) {
+            output = input;
+        } else {
+            output = myClient.translate(input, "EBM", format);
+        }
+
+        return new ByteArrayInputStream(output);
+    }
+
+    /**
      * Submits this model to the server for maximisation and returns a {@link Future} that completes with the
      * {@link OptResult}. On completion, solution values are written back to the variables.
+     * <p>
+     * Calling {@code cancel(true)} on the returned {@link Future} abandons the solve on the server as well as
+     * locally. See {@link #minimise()} for what the flag decides.
      */
     public Future<OptResult> maximise() {
         return this.optimise(true);
@@ -172,6 +271,18 @@ public final class OptModel {
     /**
      * Submits this model to the server for minimisation and returns a {@link Future} that completes with the
      * {@link OptResult}. On completion, solution values are written back to the variables.
+     * <p>
+     * The returned {@link Future} can be cancelled, and the {@code mayInterruptIfRunning} flag decides how
+     * far that reaches:
+     * <ul>
+     * <li>{@code cancel(true)} also aborts the solve on the server, freeing the worker it occupies for the
+     * next model in the queue. Use this for a solve that is taking longer than you are willing to wait.</li>
+     * <li>{@code cancel(false)} abandons only the local side. Polling stops and the {@link Future} reports
+     * cancelled, but the server keeps solving, and since the queue key is not exposed here that solve cannot
+     * be reached again.</li>
+     * </ul>
+     * Either way the {@link Future} never completes with a result, and solution values are not written back
+     * to the variables.
      */
     public Future<OptResult> minimise() {
         return this.optimise(false);
@@ -279,7 +390,11 @@ public final class OptModel {
 
     private OptResult handleResult(final Map<String, Object> response) {
 
-        OptResult result = (OptResult) response.get(OptClientV01.RESULT);
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
+
+        if (result == null) {
+            return new OptResult("FAILED", BigDecimal.ZERO, List.of());
+        }
 
         List<BigDecimal> solution = result.getSolution();
 
@@ -303,60 +418,10 @@ public final class OptModel {
         return result;
     }
 
-    void addExpression(final OptExpression expression) {
-        myExpressions.add(expression);
-    }
+    private byte[] toBytesOfEBM() {
 
-    int countVariables() {
-        return myVariables.size();
-    }
-
-    OptVariable getVariable(final int index) {
-        return myVariables.get(index);
-    }
-
-    Future<OptResult> optimise(final boolean maximize) {
-
-        AtomicLong counter = new AtomicLong();
-        CompletableFuture<OptResult> future = new CompletableFuture<>();
-
-        EXECUTOR.execute(() -> {
-
-            try {
-
-                Map<String, Object> response = myClient.putOnQueueParsed(this.toEbmBytes(), "EBM", maximize);
-                String key = (String) response.get(OptClientV01.KEY);
-                String status = (String) response.get(OptClientV01.STATUS);
-
-                while ("PENDING".equals(status)) {
-
-                    try {
-                        Thread.sleep(Math.min(10_000L, 100L * counter.getAndIncrement()));
-                    } catch (InterruptedException cause) {
-                        throw new RuntimeException(cause);
-                    }
-
-                    response = myClient.pollResultParsed(key);
-                    status = (String) response.get(OptClientV01.STATUS);
-                }
-
-                OptResult result = this.handleResult(response);
-                future.complete(result);
-
-            } catch (Exception cause) {
-                future.completeExceptionally(cause);
-            }
-        });
-
-        return future;
-    }
-
-    byte[] toEbmBytes() {
-
-        try {
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(baos, StandardCharsets.UTF_8));
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(baos, StandardCharsets.UTF_8))) {
 
             for (OptVariable v : myVariables) {
                 writer.write('V');
@@ -423,9 +488,90 @@ public final class OptModel {
 
             writer.flush();
             return baos.toByteArray();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+
+        } catch (IOException cause) {
+            throw new RuntimeException(cause);
         }
+    }
+
+    void addExpression(final OptExpression expression) {
+        myExpressions.add(expression);
+    }
+
+    int countVariables() {
+        return myVariables.size();
+    }
+
+    OptVariable getVariable(final int index) {
+        return myVariables.get(index);
+    }
+
+    Future<OptResult> optimise(final boolean maximize) {
+
+        AtomicLong counter = new AtomicLong();
+        RemoteSolve future = new RemoteSolve(myClient);
+
+        EXECUTOR.execute(() -> {
+
+            try {
+
+                if (future.isCancelled()) {
+                    return;
+                }
+
+                // Deliberately not interruptible. An interrupt here would surface as an InterruptedException
+                // out of the HTTP send, which putOnQueueParsed reports as a response with no key – and the
+                // request may well have reached the server all the same. There would then be a solve running
+                // that nothing could name, let alone abort. So a cancellation arriving during submission is
+                // recorded and acted on below rather than thrown at this call.
+                Map<String, Object> response = myClient.putOnQueueParsed(this.toBytesOfEBM(), "EBM", maximize);
+                String key = (String) response.get(OptClientV1.KEY);
+                String status = (String) response.get(OptClientV1.STATUS);
+
+                // Hands the key over before the first poll, so that a cancellation that arrived while the
+                // model was in flight has something to abort, and sends that abort now.
+                future.setKey(key);
+
+                // Only from here is interrupting this thread safe, so only from here does cancelling do it.
+                future.setPoller(Thread.currentThread());
+
+                while ("PENDING".equals(status) && !future.isCancelled()) {
+
+                    try {
+                        Thread.sleep(Math.min(10_000L, 100L * counter.getAndIncrement()));
+                    } catch (InterruptedException cause) {
+                        if (future.isCancelled()) {
+                            return;
+                        }
+                        throw new RuntimeException(cause);
+                    }
+
+                    if (future.isCancelled()) {
+                        return;
+                    }
+
+                    response = myClient.pollResultParsed(key);
+                    status = (String) response.get(OptClientV1.STATUS);
+                }
+
+                if (future.isCancelled()) {
+                    return;
+                }
+
+                OptResult result = this.handleResult(response);
+                future.complete(result);
+
+            } catch (Exception cause) {
+                future.completeExceptionally(cause);
+            } finally {
+                future.setPoller(null);
+                // Cancelling interrupted this thread to wake it. Clearing the flag keeps it usable for the
+                // next solve the pool hands it.
+                Thread.interrupted();
+            }
+        });
+
+        return future;
     }
 
 }

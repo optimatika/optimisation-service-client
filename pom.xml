@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>se.optimatika</groupId>
     <artifactId>optimisation-service-client</artifactId>
-    <version>0.1.0</version>
+    <version>1.0.0</version>
     <name>Optimisation Service Client</name>
     <description>A client to access Optimatika's optimisation service.</description>
     <packaging>jar</packaging>
@@ -37,6 +37,12 @@
         <url>https://github.com/optimatika/optimisation-service-client/issues</url>
         <system>GitHub</system>
     </issueManagement>
+    <distributionManagement>
+        <snapshotRepository>
+            <id>central</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>11</java.version>
@@ -51,7 +57,7 @@
         <dependency>
             <groupId>org.ojalgo</groupId>
             <artifactId>optimisation-models</artifactId>
-            <version>1.0.1</version>
+            <version>1.1.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -60,7 +66,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>

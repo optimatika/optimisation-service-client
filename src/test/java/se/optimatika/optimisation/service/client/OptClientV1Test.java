@@ -11,9 +11,7 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-public class OptClientV01Test {
-
-    private static final String HOST = "https://optimatika-boot-services-969062758986.europe-north1.run.app";
+public class OptClientV1Test extends AbstractTest {
 
     private static byte[] readResource(final String path) throws IOException {
         try (InputStream is = ClassLoader.getSystemResourceAsStream(path)) {
@@ -21,19 +19,19 @@ public class OptClientV01Test {
         }
     }
 
-    private static Map<String, Object> solveViaMps(final OptClientV01 client, final String resourcePath, final boolean maximize) throws Exception {
+    private static Map<String, Object> solveViaMps(final OptClientV1 client, final String resourcePath, final boolean maximize) throws Exception {
 
-        byte[] mpsData = OptClientV01Test.readResource(resourcePath);
+        byte[] mpsData = OptClientV1Test.readResource(resourcePath);
 
         Map<String, Object> response = client.putOnQueueParsed(mpsData, "MPS", maximize);
-        String key = (String) response.get(OptClientV01.KEY);
-        String status = (String) response.get(OptClientV01.STATUS);
+        String key = (String) response.get(OptClientV1.KEY);
+        String status = (String) response.get(OptClientV1.STATUS);
 
         int counter = 0;
         while ("PENDING".equals(status)) {
             Thread.sleep(Math.min(10_000L, 100L * ++counter));
             response = client.pollResultParsed(key);
-            status = (String) response.get(OptClientV01.STATUS);
+            status = (String) response.get(OptClientV1.STATUS);
         }
 
         return response;
@@ -42,7 +40,7 @@ public class OptClientV01Test {
     @Test
     public void testClientPutOnQueueAndPollResult() throws Exception {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         OptModel model = new OptModel(client);
 
@@ -53,8 +51,35 @@ public class OptClientV01Test {
 
         model.objective().set(varA, 10).set(varB, -10);
 
-        Map<String, Object> response = client.putOnQueueParsed(model.toEbmBytes(), "EBM", true);
-        Assertions.assertTrue(response.containsKey(OptClientV01.KEY));
+        Map<String, Object> response = client.putOnQueueParsed(model.exportModel("EBM").readAllBytes(), "EBM", true);
+        Assertions.assertTrue(response.containsKey(OptClientV1.KEY));
+    }
+
+    @Test
+    public void testExportFormats() throws Exception {
+
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        OptModel model = new OptModel(client);
+
+        OptVariable varA = model.newRealVariable("A").lower(0);
+        OptVariable varB = model.newRealVariable("B").lower(0);
+
+        model.newConstraint("UM2").set(varA, 1).set(varB, 1).level(2);
+
+        model.objective().set(varA, 10).set(varB, -10);
+
+        byte[] ebm = model.exportModel("EBM").readAllBytes();
+        Assertions.assertTrue(ebm.length > 0);
+
+        byte[] lp = model.exportModel("LP").readAllBytes();
+        String lpStr = new String(lp, java.nio.charset.StandardCharsets.UTF_8);
+        Assertions.assertTrue(lpStr.contains("obj"));
+
+        byte[] mps = model.exportModel("MPS").readAllBytes();
+        String mpsStr = new String(mps, java.nio.charset.StandardCharsets.UTF_8);
+        Assertions.assertTrue(mpsStr.contains("ROWS"));
+        Assertions.assertTrue(mpsStr.contains("COLUMNS"));
     }
 
     /**
@@ -64,7 +89,7 @@ public class OptClientV01Test {
     @Test
     public void testFlugpl() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         OptModel model = new OptModel(client);
 
@@ -141,10 +166,10 @@ public class OptClientV01Test {
     @Test
     public void testFlugplMps() throws Exception {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/miplib/flugpl.mps", false);
-        OptResult result = (OptResult) response.get(OptClientV01.RESULT);
+        Map<String, Object> response = OptClientV1Test.solveViaMps(client, "optimisation/MIPLIB/flugpl.mps", false);
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
         Assertions.assertEquals(0, new BigDecimal("1201500").compareTo(result.getValue()));
         Assertions.assertNotNull(result.getSolution());
@@ -157,7 +182,7 @@ public class OptClientV01Test {
     @Test
     public void testGr4x6() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         OptModel model = new OptModel(client);
 
@@ -226,10 +251,10 @@ public class OptClientV01Test {
     @Test
     public void testGr4x6Mps() throws Exception {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/miplib/gr4x6.mps", false);
-        OptResult result = (OptResult) response.get(OptClientV01.RESULT);
+        Map<String, Object> response = OptClientV1Test.solveViaMps(client, "optimisation/MIPLIB/gr4x6.mps", false);
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
         Assertions.assertEquals(0, new BigDecimal("202.35").compareTo(result.getValue()));
         Assertions.assertNotNull(result.getSolution());
@@ -238,7 +263,7 @@ public class OptClientV01Test {
     @Test
     public void testIsServiceAvailable() {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         Assertions.assertTrue(client.isServiceAvailable());
 
@@ -248,17 +273,76 @@ public class OptClientV01Test {
     @Test
     public void testOptimisationClient() {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         Assertions.assertTrue(client.isServiceAvailable());
 
         System.out.println(client.getServiceEnvironment());
     }
 
+    /**
+     * Binary knapsack problem from MIPLIB. 86 binary variables, 45 constraints. Known optimal: 11
+     */
+    @Test
+    public void testPk1Mps() throws Exception {
+
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        Map<String, Object> response = OptClientV1Test.solveViaMps(client, "optimisation/MIPLIB/pk1.mps", false);
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
+
+        Assertions.assertTrue(result.isFeasible());
+        Assertions.assertTrue(result.getValue().compareTo(new BigDecimal("11")) >= 0);
+        Assertions.assertNotNull(result.getSolution());
+    }
+
+    /**
+     * Prints what the deployed service says about itself – which build it is, what it is running on, what its
+     * licence permits, and which solvers it has. Run this to see what is actually deployed; the build section
+     * is the only thing that differs between builds.
+     */
+    @Test
+    public void testServiceEnvironment() {
+
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        String environment = client.getServiceEnvironment();
+
+        System.out.println(HOST);
+        System.out.println(environment);
+
+        Assertions.assertNotEquals("?", environment, "the service is unreachable");
+    }
+
+    /**
+     * The test server rejects models with more than 100 variables. Submitting one should return immediately
+     * with a failed (not feasible) result.
+     */
+    @Test
+    public void testTooManyVariables() throws InterruptedException, ExecutionException {
+
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        OptModel model = new OptModel(client);
+
+        OptVariable[] vars = new OptVariable[101];
+        for (int i = 0; i < vars.length; i++) {
+            vars[i] = model.newRealVariable("X" + i).lower(0);
+        }
+
+        model.objective().set(vars[0], 1);
+
+        Future<OptResult> future = model.minimise();
+        OptResult result = future.get();
+
+        Assertions.assertFalse(result.isFeasible());
+        Assertions.assertFalse(result.isOptimal());
+    }
+
     @Test
     public void testVeryBasicModel() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
 
         OptModel model = new OptModel(client);
 
