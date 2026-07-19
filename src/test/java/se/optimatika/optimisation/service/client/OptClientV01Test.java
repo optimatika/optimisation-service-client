@@ -143,7 +143,7 @@ public class OptClientV01Test {
 
         OptClientV01 client = new OptClientV01(URI.create(HOST));
 
-        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/miplib/flugpl.mps", false);
+        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/MIPLIB/flugpl.mps", false);
         OptResult result = (OptResult) response.get(OptClientV01.RESULT);
 
         Assertions.assertEquals(0, new BigDecimal("1201500").compareTo(result.getValue()));
@@ -228,7 +228,7 @@ public class OptClientV01Test {
 
         OptClientV01 client = new OptClientV01(URI.create(HOST));
 
-        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/miplib/gr4x6.mps", false);
+        Map<String, Object> response = OptClientV01Test.solveViaMps(client, "optimisation/MIPLIB/gr4x6.mps", false);
         OptResult result = (OptResult) response.get(OptClientV01.RESULT);
 
         Assertions.assertEquals(0, new BigDecimal("202.35").compareTo(result.getValue()));
