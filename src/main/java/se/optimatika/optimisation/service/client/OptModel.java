@@ -1,8 +1,10 @@
 package se.optimatika.optimisation.service.client;
 
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -162,6 +164,26 @@ public final class OptModel {
     }
 
     /**
+     * Exports this model serialised in the specified file format.
+     *
+     * @param format the desired output format: {@code "EBM"}, {@code "LP"}, or {@code "MPS"}
+     * @return an {@link InputStream} containing the serialised model
+     */
+    public InputStream exportModel(final String format) {
+
+        byte[] input = this.toBytesOfEBM();
+        byte[] output;
+
+        if ("EBM".equalsIgnoreCase(format)) {
+            output = input;
+        } else {
+            output = myClient.translate(input, "EBM", format);
+        }
+
+        return new ByteArrayInputStream(output);
+    }
+
+    /**
      * Submits this model to the server for maximisation and returns a {@link Future} that completes with the
      * {@link OptResult}. On completion, solution values are written back to the variables.
      */
@@ -303,60 +325,10 @@ public final class OptModel {
         return result;
     }
 
-    void addExpression(final OptExpression expression) {
-        myExpressions.add(expression);
-    }
+    private byte[] toBytesOfEBM() {
 
-    int countVariables() {
-        return myVariables.size();
-    }
-
-    OptVariable getVariable(final int index) {
-        return myVariables.get(index);
-    }
-
-    Future<OptResult> optimise(final boolean maximize) {
-
-        AtomicLong counter = new AtomicLong();
-        CompletableFuture<OptResult> future = new CompletableFuture<>();
-
-        EXECUTOR.execute(() -> {
-
-            try {
-
-                Map<String, Object> response = myClient.putOnQueueParsed(this.toEbmBytes(), "EBM", maximize);
-                String key = (String) response.get(OptClientV01.KEY);
-                String status = (String) response.get(OptClientV01.STATUS);
-
-                while ("PENDING".equals(status)) {
-
-                    try {
-                        Thread.sleep(Math.min(10_000L, 100L * counter.getAndIncrement()));
-                    } catch (InterruptedException cause) {
-                        throw new RuntimeException(cause);
-                    }
-
-                    response = myClient.pollResultParsed(key);
-                    status = (String) response.get(OptClientV01.STATUS);
-                }
-
-                OptResult result = this.handleResult(response);
-                future.complete(result);
-
-            } catch (Exception cause) {
-                future.completeExceptionally(cause);
-            }
-        });
-
-        return future;
-    }
-
-    byte[] toEbmBytes() {
-
-        try {
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(baos, StandardCharsets.UTF_8));
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(baos, StandardCharsets.UTF_8))) {
 
             for (OptVariable v : myVariables) {
                 writer.write('V');
@@ -423,9 +395,58 @@ public final class OptModel {
 
             writer.flush();
             return baos.toByteArray();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+
+        } catch (IOException cause) {
+            throw new RuntimeException(cause);
         }
+    }
+
+    void addExpression(final OptExpression expression) {
+        myExpressions.add(expression);
+    }
+
+    int countVariables() {
+        return myVariables.size();
+    }
+
+    OptVariable getVariable(final int index) {
+        return myVariables.get(index);
+    }
+
+    Future<OptResult> optimise(final boolean maximize) {
+
+        AtomicLong counter = new AtomicLong();
+        CompletableFuture<OptResult> future = new CompletableFuture<>();
+
+        EXECUTOR.execute(() -> {
+
+            try {
+
+                Map<String, Object> response = myClient.putOnQueueParsed(this.toBytesOfEBM(), "EBM", maximize);
+                String key = (String) response.get(OptClientV01.KEY);
+                String status = (String) response.get(OptClientV01.STATUS);
+
+                while ("PENDING".equals(status)) {
+
+                    try {
+                        Thread.sleep(Math.min(10_000L, 100L * counter.getAndIncrement()));
+                    } catch (InterruptedException cause) {
+                        throw new RuntimeException(cause);
+                    }
+
+                    response = myClient.pollResultParsed(key);
+                    status = (String) response.get(OptClientV01.STATUS);
+                }
+
+                OptResult result = this.handleResult(response);
+                future.complete(result);
+
+            } catch (Exception cause) {
+                future.completeExceptionally(cause);
+            }
+        });
+
+        return future;
     }
 
 }

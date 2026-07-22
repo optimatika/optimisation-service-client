@@ -53,8 +53,35 @@ public class OptClientV01Test {
 
         model.objective().set(varA, 10).set(varB, -10);
 
-        Map<String, Object> response = client.putOnQueueParsed(model.toEbmBytes(), "EBM", true);
+        Map<String, Object> response = client.putOnQueueParsed(model.exportModel("EBM").readAllBytes(), "EBM", true);
         Assertions.assertTrue(response.containsKey(OptClientV01.KEY));
+    }
+
+    @Test
+    public void testExportFormats() throws Exception {
+
+        OptClientV01 client = new OptClientV01(URI.create(HOST));
+
+        OptModel model = new OptModel(client);
+
+        OptVariable varA = model.newRealVariable("A").lower(0);
+        OptVariable varB = model.newRealVariable("B").lower(0);
+
+        model.newConstraint("UM2").set(varA, 1).set(varB, 1).level(2);
+
+        model.objective().set(varA, 10).set(varB, -10);
+
+        byte[] ebm = model.exportModel("EBM").readAllBytes();
+        Assertions.assertTrue(ebm.length > 0);
+
+        byte[] lp = model.exportModel("LP").readAllBytes();
+        String lpStr = new String(lp, java.nio.charset.StandardCharsets.UTF_8);
+        Assertions.assertTrue(lpStr.contains("obj"));
+
+        byte[] mps = model.exportModel("MPS").readAllBytes();
+        String mpsStr = new String(mps, java.nio.charset.StandardCharsets.UTF_8);
+        Assertions.assertTrue(mpsStr.contains("ROWS"));
+        Assertions.assertTrue(mpsStr.contains("COLUMNS"));
     }
 
     /**

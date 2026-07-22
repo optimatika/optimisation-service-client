@@ -65,6 +65,7 @@ public final class OptClientV01 {
     private static final String PATH_TEST = "/optimisation/v01/test";
     private static final String POLL_RESULT = "/optimisation/v01/poll-result/";
     private static final String PUT_ON_QUEUE = "/optimisation/v01/put-on-queue/";
+    private static final String TRANSLATE = "/optimisation/v01/translate/";
 
     /**
      * Convenience factory that parses the given string as a {@link URI}.
@@ -348,6 +349,35 @@ public final class OptClientV01 {
         } catch (IOException | InterruptedException cause) {
 
             return Map.of(STATUS, "DONE");
+        }
+    }
+
+    /**
+     * Translates a model from one file format to another.
+     *
+     * @param data         the serialised model bytes in the input format
+     * @param inputFormat  the format of the input data: {@code "EBM"}, {@code "LP"}, or {@code "MPS"}
+     * @param outputFormat the desired output format: {@code "EBM"}, {@code "LP"}, or {@code "MPS"}
+     * @return the model serialised in the output format
+     */
+    public byte[] translate(final byte[] data, final String inputFormat, final String outputFormat) {
+
+        try {
+
+            URI uri = URI.create(myHost + TRANSLATE + inputFormat.toUpperCase() + "/" + outputFormat.toUpperCase());
+
+            HttpRequest request = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build();
+
+            HttpResponse<byte[]> response = myClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Translation failed with status " + response.statusCode());
+            }
+
+            return response.body();
+
+        } catch (IOException | InterruptedException cause) {
+            throw new RuntimeException(cause);
         }
     }
 
