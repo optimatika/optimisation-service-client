@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * HTTP client wrapper for the Optimisation Service REST API (version {@code v01}).
+ * HTTP client wrapper for the Optimisation Service REST API (version {@code v1}).
  * <p>
  * The service uses an asynchronous queue-based protocol:
  * <ol>
@@ -39,7 +39,7 @@ import java.util.Objects;
  *
  * @see OptModel
  */
-public final class OptClientV01 {
+public final class OptClientV1 {
 
     /**
      * Map key for the queue identifier ({@link String}). Present in every response from both
@@ -61,20 +61,20 @@ public final class OptClientV01 {
 
     private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
 
-    private static final String PATH_ENVIRONMENT = "/optimisation/v01/environment";
-    private static final String PATH_TEST = "/optimisation/v01/test";
-    private static final String POLL_RESULT = "/optimisation/v01/poll-result/";
-    private static final String PUT_ON_QUEUE = "/optimisation/v01/put-on-queue/";
-    private static final String TRANSLATE = "/optimisation/v01/translate/";
+    private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
+    private static final String PATH_TEST = "/optimisation/v1/test";
+    private static final String POLL_RESULT = "/optimisation/v1/poll-result/";
+    private static final String PUT_ON_QUEUE = "/optimisation/v1/put-on-queue/";
+    private static final String TRANSLATE = "/optimisation/v1/translate/";
 
     /**
      * Convenience factory that parses the given string as a {@link URI}.
      *
      * @param uri base URI of the optimisation service (scheme + host + port, no path)
-     * @see #OptClientV01(URI)
+     * @see #OptClientV1(URI)
      */
-    public static OptClientV01 newInstance(final String uri) {
-        return new OptClientV01(URI.create(uri));
+    public static OptClientV1 newInstance(final String uri) {
+        return new OptClientV1(URI.create(uri));
     }
 
     private static void interpretResult(final Map<String, Object> map) {
@@ -82,7 +82,7 @@ public final class OptClientV01 {
         Object result = map.get(RESULT);
 
         if (result != null) {
-            OptClientV01.parseResult(result.toString(), map);
+            OptClientV1.parseResult(result.toString(), map);
         }
     }
 
@@ -132,7 +132,7 @@ public final class OptClientV01 {
      *             {@code URI.create("https://example.com")}
      * @throws IllegalArgumentException if the URI contains a path
      */
-    public OptClientV01(final URI host) {
+    public OptClientV1(final URI host) {
 
         Objects.requireNonNull(host);
 
@@ -266,9 +266,9 @@ public final class OptClientV01 {
 
             String body = this.pollResult(key);
 
-            Map<String, Object> retVal = OptClientV01.parseResponse(body);
+            Map<String, Object> retVal = OptClientV1.parseResponse(body);
 
-            OptClientV01.interpretResult(retVal);
+            OptClientV1.interpretResult(retVal);
 
             return retVal;
 
@@ -340,9 +340,9 @@ public final class OptClientV01 {
 
             String body = this.putOnQueue(data, format, maximize);
 
-            Map<String, Object> retVal = OptClientV01.parseResponse(body);
+            Map<String, Object> retVal = OptClientV1.parseResponse(body);
 
-            OptClientV01.interpretResult(retVal);
+            OptClientV1.interpretResult(retVal);
 
             return retVal;
 

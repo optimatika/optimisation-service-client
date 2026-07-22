@@ -32,13 +32,13 @@ import java.util.function.Consumer;
  * server and obtain a {@link Future} that completes with the {@link OptResult}.
  * <p>
  * The model is serialised to the EBM (Expression-Based Model) format and sent to the server via
- * {@link OptClientV01}. The server solves the model and the result is polled asynchronously. On completion,
+ * {@link OptClientV1}. The server solves the model and the result is polled asynchronously. On completion,
  * solution values are written back to the variables and any registered value receivers are notified.
  * <p>
- * You create instances by first creating a {@link OptClientV01} and then calling
- * {@link OptClientV01#newModel()}.
+ * You create instances by first creating a {@link OptClientV1} and then calling
+ * {@link OptClientV1#newModel()}.
  *
- * @see OptClientV01
+ * @see OptClientV1
  */
 public final class OptModel {
 
@@ -151,13 +151,13 @@ public final class OptModel {
         return BigDecimal.valueOf(value);
     }
 
-    private final OptClientV01 myClient;
+    private final OptClientV1 myClient;
     private final Map<String, Consumer<BigDecimal>> myConsumers = new HashMap<>();
     private final List<OptExpression> myExpressions = new ArrayList<>();
     private final OptObjective myObjective;
     private final List<OptVariable> myVariables = new ArrayList<>();
 
-    OptModel(final OptClientV01 client) {
+    OptModel(final OptClientV1 client) {
         super();
         myClient = Objects.requireNonNull(client);
         myObjective = new OptObjective(this);
@@ -301,7 +301,7 @@ public final class OptModel {
 
     private OptResult handleResult(final Map<String, Object> response) {
 
-        OptResult result = (OptResult) response.get(OptClientV01.RESULT);
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
         List<BigDecimal> solution = result.getSolution();
 
@@ -423,8 +423,8 @@ public final class OptModel {
             try {
 
                 Map<String, Object> response = myClient.putOnQueueParsed(this.toBytesOfEBM(), "EBM", maximize);
-                String key = (String) response.get(OptClientV01.KEY);
-                String status = (String) response.get(OptClientV01.STATUS);
+                String key = (String) response.get(OptClientV1.KEY);
+                String status = (String) response.get(OptClientV1.STATUS);
 
                 while ("PENDING".equals(status)) {
 
@@ -435,7 +435,7 @@ public final class OptModel {
                     }
 
                     response = myClient.pollResultParsed(key);
-                    status = (String) response.get(OptClientV01.STATUS);
+                    status = (String) response.get(OptClientV1.STATUS);
                 }
 
                 OptResult result = this.handleResult(response);

@@ -40,7 +40,7 @@ public class StandardProblemsTest {
     @Test
     public void testAssignmentProblem() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int[][] cost = { { 9, 2, 7, 8 }, { 6, 4, 3, 7 }, { 5, 8, 1, 8 }, { 7, 6, 9, 4 } };
@@ -95,7 +95,7 @@ public class StandardProblemsTest {
     @Test
     public void testBinPackingProblem() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int[] sizes = { 7, 5, 4, 3, 3, 2, 2 };
@@ -166,7 +166,7 @@ public class StandardProblemsTest {
     @Test
     public void testDietProblem() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         OptVariable oatmeal = model.newRealVariable("oatmeal");
@@ -195,7 +195,7 @@ public class StandardProblemsTest {
     @Test
     public void testKnapsackProblem() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int[] weights = { 2, 3, 6, 7, 5, 4 };
@@ -237,7 +237,7 @@ public class StandardProblemsTest {
     @Test
     public void testMaximumFlow() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         OptVariable fSA = model.newRealVariable("sa").upper(10);
@@ -277,7 +277,7 @@ public class StandardProblemsTest {
     @Test
     public void testNewsvendorProblem() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int sellingPrice = 25;
@@ -337,7 +337,7 @@ public class StandardProblemsTest {
     @Test
     public void testPortfolioOptimisation() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         OptVariable w1 = model.newRealVariable("w1").lower(0).upper(1);
@@ -377,7 +377,7 @@ public class StandardProblemsTest {
     @Test
     public void testPortfolioWholeShares() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         OptVariable.IntegerVariable u1 = model.newIntegerVariable("u1").lower(0).upper(100);
@@ -423,7 +423,7 @@ public class StandardProblemsTest {
     @Test
     public void testShortestPath() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         OptVariable f01 = model.newRealVariable("f01");
@@ -472,7 +472,7 @@ public class StandardProblemsTest {
     @Test
     public void testTSP() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int n = 5;
@@ -565,7 +565,7 @@ public class StandardProblemsTest {
     @Test
     public void testVRP() throws InterruptedException, ExecutionException {
 
-        OptClientV01 client = new OptClientV01(URI.create(HOST));
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
         OptModel model = client.newModel();
 
         int n = 5;
