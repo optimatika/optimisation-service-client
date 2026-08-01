@@ -63,6 +63,7 @@ public final class OptClientV1 {
 
     private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
     private static final String PATH_TEST = "/optimisation/v1/test";
+    private static final String PATH_VERSION = "/optimisation/v1/version";
     private static final String POLL_RESULT = "/optimisation/v1/poll-result/";
     private static final String PUT_ON_QUEUE = "/optimisation/v1/put-on-queue/";
     private static final String TRANSLATE = "/optimisation/v1/translate/";
@@ -153,6 +154,29 @@ public final class OptClientV1 {
         try {
 
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
+
+            HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+
+            return response.body();
+
+        } catch (Exception cause) {
+            return "?";
+        }
+    }
+
+    /**
+     * Queries the server's {@code /version} endpoint and returns its identification of the running build –
+     * artefact version, build variant, when it was packaged, and the commit it was built from. Returns
+     * {@code "?"} if the server is unreachable.
+     * <p>
+     * Nothing else the service exposes changes visibly between builds, so this is the way to tell which
+     * deployment you are actually talking to.
+     */
+    public String getServiceVersion() {
+
+        try {
+
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_VERSION)).GET().build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
