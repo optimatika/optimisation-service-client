@@ -15,7 +15,7 @@ The optimisation service does not require this – this client simply tries to m
 
 ```java
 // Connect to the service
-OptClientV01 client = OptClientV01.newInstance("https://your-service-host");
+OptClientV1 client = OptClientV1.newInstance("https://your-service-host");
 
 // Build a model
 OptModel model = client.newModel();
@@ -40,7 +40,7 @@ System.out.println("y = " + y.doubleValue());
 
 | Class | Role |
 |---|---|
-| `OptClientV01` | HTTP client — submits models and polls for results |
+| `OptClientV1` | HTTP client — submits models and polls for results |
 | `OptModel` | Model builder — variables, constraints, objective, serialisation |
 | `OptVariable` | Decision variable (real, integer, or binary) |
 | `OptConstraint` | Linear/quadratic constraint with bounds |
@@ -52,8 +52,8 @@ System.out.println("y = " + y.doubleValue());
 
 The client is split into two distinct layers:
 
-- **`OptClientV01`** is a thin HTTP client wrapper. It knows how to submit bytes to the server and parse the JSON response, but knows nothing about what a model looks like. You can use it standalone to submit MPS files or any other format the server supports.
-- **`OptModel`** is a model builder. It provides the fluent API for variables, constraints, and objectives, handles serialisation, and manages the poll loop and result mapping. It delegates all HTTP communication to an `OptClientV01` instance passed to its constructor.
+- **`OptClientV1`** is a thin HTTP client wrapper. It knows how to submit bytes to the server and parse the JSON response, but knows nothing about what a model looks like. You can use it standalone to submit MPS files or any other format the server supports.
+- **`OptModel`** is a model builder. It provides the fluent API for variables, constraints, and objectives, handles serialisation, and manages the poll loop and result mapping. It delegates all HTTP communication to an `OptClientV1` instance passed to its constructor.
 
 This separation means you can use the HTTP client directly without the model builder, or replace the model builder without touching the HTTP layer.
 
@@ -66,14 +66,55 @@ The `putOnQueue` and `pollResult` method signatures match ojAlgo's `Optimisation
 3. The client polls the server until the solver finishes.
 4. The result is parsed, solution values are written back to the variables, and the `Future<OptResult>` completes.
 
-Models can also be submitted directly as MPS files via `OptClientV01.putOnQueue()`.
+Models can also be submitted directly as MPS files via `OptClientV1.putOnQueue()`.
+
+## Aborting
+
+A solve that runs longer than you are willing to wait can be abandoned. Through
+`OptModel`, cancel the `Future`:
+
+```java
+Future<OptResult> future = model.minimise();
+
+// ... later, having decided not to wait any longer
+future.cancel(true);
+```
+
+`cancel(true)` aborts the solve on the server too, freeing the worker it occupies
+for the next model in the queue. `cancel(false)` abandons only the local side —
+polling stops and the `Future` reports cancelled, but the server keeps solving,
+and since `OptModel` does not expose the queue key that solve cannot be reached
+again.
+
+The same thing on the HTTP client, where the key is visible:
+
+```java
+Map<String, Object> submitted = client.putOnQueueParsed(mpsData, "MPS", false);
+String key = (String) submitted.get(OptClientV1.KEY);
+
+client.abortParsed(key);
+```
+
+Either way the solve goes straight to `DONE` with no result — the partial solution the
+solver had reached is discarded — so a client polling it stops polling and finds
+nothing to read. Other solves are untouched, whether they are already running or
+still waiting in the queue. Aborting a solve that has already finished is a
+no-op: it keeps its result.
+
+`abortAll()` does the same to everything the server currently holds, and reports
+how many solves it stopped, split into `QUEUED` and `ONGOING`. It affects every
+client of that server, not just the one calling it.
+
+The server solves a fixed number of models at once and queues the rest, so a
+model submitted while the server is at capacity is accepted and given a key but
+produces no result until a slot frees up. Only a full queue is refused outright.
 
 ## Use with ojAlgo
 
 If you use [ojAlgo](https://www.ojalgo.org/), you can wire this client into `ExpressionsBasedModel` so that calling `submit()` solves remotely:
 
 ```java
-OptClientV01 client = OptClientV01.newInstance("https://your-service-host");
+OptClientV1 client = OptClientV1.newInstance("https://your-service-host");
 
 Optimisation.Environment environment = Optimisation.newEnvironment();
 environment.setRemoteSolver(client::putOnQueue, client::pollResult);

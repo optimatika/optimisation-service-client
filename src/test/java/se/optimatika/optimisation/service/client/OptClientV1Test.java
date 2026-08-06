@@ -39,24 +39,6 @@ public class OptClientV1Test {
         return response;
     }
 
-    /**
-     * Prints which build the deployed service is running – version, variant, when it was packaged, and the
-     * commit it came from. Run this to see what is actually deployed; nothing else the service exposes
-     * differs between builds.
-     */
-    @Test
-    public void testServiceVersion() {
-
-        OptClientV1 client = new OptClientV1(URI.create(HOST));
-
-        String version = client.getServiceVersion();
-
-        System.out.println(HOST);
-        System.out.println(version);
-
-        Assertions.assertNotEquals("?", version, "the service is unreachable");
-    }
-
     @Test
     public void testClientPutOnQueueAndPollResult() throws Exception {
 
@@ -298,6 +280,24 @@ public class OptClientV1Test {
         Assertions.assertTrue(client.isServiceAvailable());
 
         System.out.println(client.getServiceEnvironment());
+    }
+
+    /**
+     * Prints which build the deployed service is running – version, variant, when it was packaged, and the
+     * commit it came from. Run this to see what is actually deployed; nothing else the service exposes
+     * differs between builds.
+     */
+    @Test
+    public void testServiceVersion() {
+
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        String version = client.getServiceVersion();
+
+        System.out.println(HOST);
+        System.out.println(version);
+
+        Assertions.assertNotEquals("?", version, "the service is unreachable");
     }
 
     @Test

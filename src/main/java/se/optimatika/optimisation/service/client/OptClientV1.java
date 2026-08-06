@@ -27,6 +27,9 @@ import java.util.Objects;
  * {@link #pollResultParsed}) additionally parse the JSON into a {@code Map} and convert the result string to
  * an {@link OptResult}.
  * <p>
+ * A submitted model can be abandoned again before it finishes – one at a time with {@link #abort(String)}, or
+ * all of them at once with {@link #abortAll()}. Either way the solve ends up {@code "DONE"} without a result.
+ * <p>
  * This class can be used standalone for direct HTTP access, or indirectly through {@link OptModel} which adds
  * model building, serialisation, and result polling on top.
  * <p>
@@ -48,6 +51,16 @@ public final class OptClientV1 {
      */
     public static final String KEY = "key";
     /**
+     * Map key for the number of already running solves that {@link #abortAll()} stopped ({@link Integer}).
+     * Present only in the map returned by {@link #abortAll()}.
+     */
+    public static final String ONGOING = "ongoing";
+    /**
+     * Map key for the number of not yet started solves that {@link #abortAll()} took off the queue
+     * ({@link Integer}). Present only in the map returned by {@link #abortAll()}.
+     */
+    public static final String QUEUED = "queued";
+    /**
      * Map key for the parsed solver result ({@link OptResult}). Present only in maps returned by
      * {@link #pollResultParsed} (or {@link #putOnQueueParsed} if the solver completes immediately) when the
      * status is {@code "DONE"} and the server included a result string.
@@ -59,8 +72,10 @@ public final class OptClientV1 {
      */
     public static final String STATUS = "status";
 
-    private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
+    private static final String ABORT = "/optimisation/v1/abort/";
 
+    private static final String ABORT_ALL = "/optimisation/v1/abort-all";
+    private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
     private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
     private static final String PATH_TEST = "/optimisation/v1/test";
     private static final String PATH_VERSION = "/optimisation/v1/version";
@@ -85,6 +100,27 @@ public final class OptClientV1 {
         if (result != null) {
             OptClientV1.parseResult(result.toString(), map);
         }
+    }
+
+    /**
+     * Reads one unquoted integer field out of a flat JSON object. {@link #parseResponse} cannot be used for
+     * the abort-all response because it assumes every value is a quoted string.
+     */
+    private static int parseCount(final String json, final String field) {
+
+        int start = json.indexOf('"' + field + "\":");
+
+        if (start < 0) {
+            throw new RuntimeException("No '" + field + "' in: " + json);
+        }
+
+        int pos = start + field.length() + 3;
+        int end = pos;
+        while (end < json.length() && Character.isDigit(json.charAt(end))) {
+            end++;
+        }
+
+        return Integer.parseInt(json.substring(pos, end));
     }
 
     private static Map<String, Object> parseResponse(final String json) {
@@ -143,6 +179,110 @@ public final class OptClientV1 {
 
         myHost = host.toASCIIString();
         myClient = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
+    }
+
+    /**
+     * Abandons one queued or ongoing solve. Returns the raw JSON response body, which has the same shape as
+     * {@link #pollResult(String)} and reports the solve as {@code "DONE"} without a {@code "result"} – the
+     * partial solution the solver had reached is discarded.
+     * <p>
+     * Only the named solve is affected. Other solves, whether already running or still waiting in the queue,
+     * are left alone.
+     * <p>
+     * Aborting a solve that has already finished is a no-op: it stays {@code "DONE"} and keeps its result.
+     *
+     * @param key the queue identifier returned by {@link #putOnQueue}
+     * @return the raw JSON response body, or {@code null} if the server does not know this key, which
+     *         includes keys whose results have expired
+     * @throws IOException          if the HTTP request fails
+     * @throws InterruptedException if the thread is interrupted while waiting for the response
+     * @see #abortParsed(String)
+     */
+    public String abort(final String key) throws IOException, InterruptedException {
+
+        URI uri = URI.create(myHost + ABORT + key);
+
+        HttpRequest request = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.noBody()).build();
+
+        HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+
+        if (response.statusCode() == 404) {
+            return null;
+        }
+
+        return response.body();
+    }
+
+    /**
+     * Purges the queue and aborts every ongoing solve – {@link #abort(String)} applied to everything the
+     * server currently holds. Solves that have already finished keep their results.
+     * <p>
+     * The returned map has two entries, both {@link Integer}:
+     * <ul>
+     * <li>{@link #QUEUED} — how many solves were taken off the queue without ever starting</li>
+     * <li>{@link #ONGOING} — how many solves were already running and were interrupted</li>
+     * </ul>
+     * This affects every client of the server, not just this one.
+     *
+     * @return the queued and ongoing counts abandoned
+     * @throws RuntimeException if the request fails or the response cannot be read
+     */
+    public Map<String, Object> abortAll() {
+
+        try {
+
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + ABORT_ALL)).POST(HttpRequest.BodyPublishers.noBody()).build();
+
+            HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Abort-all failed with status " + response.statusCode());
+            }
+
+            String body = response.body();
+
+            Map<String, Object> retVal = new LinkedHashMap<>();
+            retVal.put(QUEUED, Integer.valueOf(OptClientV1.parseCount(body, QUEUED)));
+            retVal.put(ONGOING, Integer.valueOf(OptClientV1.parseCount(body, ONGOING)));
+
+            return retVal;
+
+        } catch (IOException | InterruptedException cause) {
+            throw new RuntimeException(cause);
+        }
+    }
+
+    /**
+     * Calls {@link #abort(String)} and parses the JSON response into the same map that
+     * {@link #pollResultParsed} returns – {@link #KEY} and {@link #STATUS}, and {@link #RESULT} only if the
+     * solve had already finished with one before the abort arrived.
+     * <p>
+     * Returns an empty map if the server does not know the key, or on a network or interruption error.
+     *
+     * @param key the queue identifier returned by {@link #putOnQueue}
+     * @return a parsed map of the server response, or an empty map
+     * @see #abort(String)
+     */
+    public Map<String, Object> abortParsed(final String key) {
+
+        try {
+
+            String body = this.abort(key);
+
+            if (body == null) {
+                return Map.of();
+            }
+
+            Map<String, Object> retVal = OptClientV1.parseResponse(body);
+
+            OptClientV1.interpretResult(retVal);
+
+            return retVal;
+
+        } catch (IOException | InterruptedException cause) {
+
+            return Map.of();
+        }
     }
 
     /**
