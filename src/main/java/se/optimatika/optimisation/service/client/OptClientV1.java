@@ -92,34 +92,91 @@ public final class OptClientV1 {
         return new OptClientV1(URI.create(uri));
     }
 
-    private static void interpretResult(final Map<String, Object> map) {
-
-        Object result = map.get(RESULT);
-
-        if (result != null) {
-            OptClientV1.parseResult(result.toString(), map);
-        }
-    }
-
     /**
      * Reads one unquoted integer field out of a flat JSON object. {@link #parseResponse} cannot be used for
      * the abort-all response because it assumes every value is a quoted string.
      */
     private static int parseCount(final String json, final String field) {
 
-        int start = json.indexOf('"' + field + "\":");
+        String member = '"' + field + "\":";
+
+        int start = json.indexOf(member);
 
         if (start < 0) {
             throw new RuntimeException("No '" + field + "' in: " + json);
         }
 
-        int pos = start + field.length() + 3;
-        int end = pos;
-        while (end < json.length() && Character.isDigit(json.charAt(end))) {
-            end++;
+        int first = start + member.length();
+        int limit = first;
+        while (limit < json.length() && Character.isDigit(json.charAt(limit))) {
+            limit++;
         }
 
-        return Integer.parseInt(json.substring(pos, end));
+        return Integer.parseInt(json.substring(first, limit));
+    }
+
+    /**
+     * The fields of a queue response, every value a quoted string – which the three endpoints answering with
+     * one only ever send. A {@link #RESULT} is replaced by the {@link OptResult} it describes.
+     */
+    private static Map<String, Object> parseResponse(final String json) {
+
+        Map<String, Object> map = new LinkedHashMap<>();
+
+        int pos = 0;
+        while (true) {
+            int keyStart = json.indexOf('"', pos);
+            if (keyStart < 0) {
+                break;
+            }
+            int keyEnd = json.indexOf('"', keyStart + 1);
+            String fieldName = json.substring(keyStart + 1, keyEnd);
+            int valStart = json.indexOf('"', keyEnd + 1);
+            int valEnd = json.indexOf('"', valStart + 1);
+            map.put(fieldName, json.substring(valStart + 1, valEnd));
+            pos = valEnd + 1;
+        }
+
+        Object result = map.get(RESULT);
+
+        if (result != null) {
+            map.put(RESULT, OptClientV1.parseResult(result.toString()));
+        }
+
+        return map;
+    }
+
+    /**
+     * Reads back what {@code Optimisation.Result.toString()} wrote – a state, an objective value, and the
+     * solution vector between braces.
+     */
+    private static OptResult parseResult(final String result) {
+
+        int firstSpace = result.indexOf(' ');
+        int atMark = result.indexOf(" @ ");
+
+        String state = result.substring(0, firstSpace);
+        BigDecimal value = new BigDecimal(result.substring(firstSpace + 1, atMark));
+
+        String solutionPart = result.substring(result.indexOf('{') + 1, result.lastIndexOf('}')).trim();
+        String[] parts = solutionPart.split(", ");
+        List<BigDecimal> solution = new ArrayList<>(parts.length);
+        for (String part : parts) {
+            solution.add(new BigDecimal(part));
+        }
+
+        return new OptResult(state, value, solution);
+    }
+
+    private static int skipWhitespace(final String json, final int from) {
+
+        int retVal = from;
+
+        while (retVal < json.length() && Character.isWhitespace(json.charAt(retVal))) {
+            retVal++;
+        }
+
+        return retVal;
     }
 
     /**
@@ -134,20 +191,14 @@ public final class OptClientV1 {
 
         for (int at = json.indexOf(FIELD_AVAILABLE); at >= 0; at = json.indexOf(FIELD_AVAILABLE, at + 1)) {
 
-            int pos = at + FIELD_AVAILABLE.length();
-
             // The name has to be a field whose value is the array, not the same word occurring inside some
             // other field's text. Anything else and this is the wrong match, so keep looking.
-            while (pos < json.length() && Character.isWhitespace(json.charAt(pos))) {
-                pos++;
-            }
-            if (pos >= json.length() || json.charAt(pos) != ':') {
+            int colon = OptClientV1.skipWhitespace(json, at + FIELD_AVAILABLE.length());
+            if (colon >= json.length() || json.charAt(colon) != ':') {
                 continue;
             }
-            pos++;
-            while (pos < json.length() && Character.isWhitespace(json.charAt(pos))) {
-                pos++;
-            }
+
+            int pos = OptClientV1.skipWhitespace(json, colon + 1);
             if (pos >= json.length() || json.charAt(pos) != '[') {
                 continue;
             }
@@ -166,44 +217,6 @@ public final class OptClientV1 {
         }
 
         return 0;
-    }
-
-    private static Map<String, Object> parseResponse(final String json) {
-
-        Map<String, Object> map = new LinkedHashMap<>();
-
-        int pos = 0;
-        while (true) {
-            int keyStart = json.indexOf('"', pos);
-            if (keyStart < 0) {
-                break;
-            }
-            int keyEnd = json.indexOf('"', keyStart + 1);
-            String fieldName = json.substring(keyStart + 1, keyEnd);
-            int valStart = json.indexOf('"', keyEnd + 1);
-            int valEnd = json.indexOf('"', valStart + 1);
-            map.put(fieldName, json.substring(valStart + 1, valEnd));
-            pos = valEnd + 1;
-        }
-        return map;
-    }
-
-    private static void parseResult(final String result, final Map<String, Object> map) {
-
-        int firstSpace = result.indexOf(' ');
-        int atMark = result.indexOf(" @ ");
-
-        String state = result.substring(0, firstSpace);
-        BigDecimal value = new BigDecimal(result.substring(firstSpace + 1, atMark));
-
-        String solutionPart = result.substring(atMark + 5, result.length() - 2);
-        String[] parts = solutionPart.split(", ");
-        List<BigDecimal> solution = new ArrayList<>(parts.length);
-        for (String part : parts) {
-            solution.add(new BigDecimal(part));
-        }
-
-        map.put(RESULT, new OptResult(state, value, solution));
     }
 
     private final HttpClient myClient;
@@ -318,11 +331,7 @@ public final class OptClientV1 {
                 return Map.of();
             }
 
-            Map<String, Object> retVal = OptClientV1.parseResponse(body);
-
-            OptClientV1.interpretResult(retVal);
-
-            return retVal;
+            return OptClientV1.parseResponse(body);
 
         } catch (IOException | InterruptedException cause) {
 
@@ -354,7 +363,6 @@ public final class OptClientV1 {
             return "?";
         }
     }
-
 
     /**
      * Checks that this API is usable: that the host is reachable, that {@code /optimisation/v1/} is mounted
@@ -463,11 +471,7 @@ public final class OptClientV1 {
 
             String body = this.pollResult(key);
 
-            Map<String, Object> retVal = OptClientV1.parseResponse(body);
-
-            OptClientV1.interpretResult(retVal);
-
-            return retVal;
+            return OptClientV1.parseResponse(body);
 
         } catch (IOException | InterruptedException cause) {
 
@@ -537,11 +541,7 @@ public final class OptClientV1 {
 
             String body = this.putOnQueue(data, format, maximize);
 
-            Map<String, Object> retVal = OptClientV1.parseResponse(body);
-
-            OptClientV1.interpretResult(retVal);
-
-            return retVal;
+            return OptClientV1.parseResponse(body);
 
         } catch (IOException | InterruptedException cause) {
 
