@@ -76,9 +76,8 @@ public final class OptClientV1 {
 
     private static final String ABORT_ALL = "/optimisation/v1/abort-all";
     private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
+    private static final String FIELD_AVAILABLE = "\"available\"";
     private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
-    /** Not under {@code /optimisation/v1/} – liveness is the server's, not this API's. */
-    private static final String PATH_HEALTH = "/health";
     private static final String POLL_RESULT = "/optimisation/v1/poll-result/";
     private static final String PUT_ON_QUEUE = "/optimisation/v1/put-on-queue/";
     private static final String TRANSLATE = "/optimisation/v1/translate/";
@@ -121,6 +120,52 @@ public final class OptClientV1 {
         }
 
         return Integer.parseInt(json.substring(pos, end));
+    }
+
+    /**
+     * How many entries the {@code solvers.available} array of an environment response holds. Counting the
+     * quoted entries is enough for that one question, and keeps this client free of a JSON dependency.
+     */
+    static int parseAvailableSolvers(final String json) {
+
+        if (json == null) {
+            return 0;
+        }
+
+        for (int at = json.indexOf(FIELD_AVAILABLE); at >= 0; at = json.indexOf(FIELD_AVAILABLE, at + 1)) {
+
+            int pos = at + FIELD_AVAILABLE.length();
+
+            // The name has to be a field whose value is the array, not the same word occurring inside some
+            // other field's text. Anything else and this is the wrong match, so keep looking.
+            while (pos < json.length() && Character.isWhitespace(json.charAt(pos))) {
+                pos++;
+            }
+            if (pos >= json.length() || json.charAt(pos) != ':') {
+                continue;
+            }
+            pos++;
+            while (pos < json.length() && Character.isWhitespace(json.charAt(pos))) {
+                pos++;
+            }
+            if (pos >= json.length() || json.charAt(pos) != '[') {
+                continue;
+            }
+
+            int close = json.indexOf(']', pos);
+            if (close < 0) {
+                return 0;
+            }
+
+            int quotes = 0;
+            for (int q = json.indexOf('"', pos); q >= 0 && q < close; q = json.indexOf('"', q + 1)) {
+                quotes++;
+            }
+
+            return quotes / 2;
+        }
+
+        return 0;
     }
 
     private static Map<String, Object> parseResponse(final String json) {
@@ -312,13 +357,13 @@ public final class OptClientV1 {
 
 
     /**
-     * Checks that the service is reachable and does not consider itself in need of a restart, by calling its
-     * {@code /health} endpoint. That endpoint answers with a status code and no body.
+     * Checks that this API is usable: that the host is reachable, that {@code /optimisation/v1/} is mounted
+     * there, and that the deployment has at least one solver to work with.
      * <p>
-     * Note what this does not tell you. Health reports only what restarting the server would repair, so a
-     * deployment with no native solvers, without a licence key, or still probing its solvers is reported
-     * available – it is working, just not with everything. Ask {@link #getServiceEnvironment()} what it
-     * actually has.
+     * Deliberately not the server's {@code /health} endpoint. That answers whether an operator should restart
+     * the container, which is both broader and narrower than what a caller needs to know – broader because a
+     * future handler failing has nothing to do with solving, and narrower because a process can be in perfect
+     * health while this API is not mounted on it at all.
      * <p>
      * Returns {@code false} on any error or unexpected response.
      */
@@ -326,13 +371,17 @@ public final class OptClientV1 {
 
         try {
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_HEALTH)).GET().build();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
-            int status = response.statusCode();
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return false;
+            }
 
-            return status >= 200 && status < 300;
+            // Not gated on the deployment having finished probing its native solvers – the built-in ones are
+            // listed before that finishes, and they solve.
+            return OptClientV1.parseAvailableSolvers(response.body()) > 0;
 
         } catch (Exception cause) {
             return false;
