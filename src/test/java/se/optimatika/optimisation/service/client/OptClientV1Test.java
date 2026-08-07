@@ -283,21 +283,21 @@ public class OptClientV1Test {
     }
 
     /**
-     * Prints which build the deployed service is running – version, variant, when it was packaged, and the
-     * commit it came from. Run this to see what is actually deployed; nothing else the service exposes
-     * differs between builds.
+     * Prints what the deployed service says about itself – which build it is, what it is running on, what its
+     * licence permits, and which solvers it has. Run this to see what is actually deployed; the build section
+     * is the only thing that differs between builds.
      */
     @Test
-    public void testServiceVersion() {
+    public void testServiceEnvironment() {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        String version = client.getServiceVersion();
+        String environment = client.getServiceEnvironment();
 
         System.out.println(HOST);
-        System.out.println(version);
+        System.out.println(environment);
 
-        Assertions.assertNotEquals("?", version, "the service is unreachable");
+        Assertions.assertNotEquals("?", environment, "the service is unreachable");
     }
 
     @Test

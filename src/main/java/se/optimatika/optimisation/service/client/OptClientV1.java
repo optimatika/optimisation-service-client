@@ -77,8 +77,8 @@ public final class OptClientV1 {
     private static final String ABORT_ALL = "/optimisation/v1/abort-all";
     private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
     private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
-    private static final String PATH_TEST = "/optimisation/v1/test";
-    private static final String PATH_VERSION = "/optimisation/v1/version";
+    /** Not under {@code /optimisation/v1/} – liveness is the server's, not this API's. */
+    private static final String PATH_HEALTH = "/health";
     private static final String POLL_RESULT = "/optimisation/v1/poll-result/";
     private static final String PUT_ON_QUEUE = "/optimisation/v1/put-on-queue/";
     private static final String TRANSLATE = "/optimisation/v1/translate/";
@@ -286,8 +286,14 @@ public final class OptClientV1 {
     }
 
     /**
-     * Queries the server's {@code /environment} endpoint and returns a description of the runtime environment
-     * (JVM version, available memory, thread count, etc.). Returns {@code "?"} if the server is unreachable.
+     * Queries the server's {@code /environment} endpoint and returns its description of itself, as raw JSON:
+     * the build it was packaged from, the runtime it is on (memory, threads, architecture), what its licence
+     * permits, and which solvers it has.
+     * <p>
+     * The solver list is what that deployment can actually do – it is deliberately not fixed across
+     * deployments, and {@code solvers.probed} is false while the server is still working it out.
+     * <p>
+     * Returns {@code "?"} if the server is unreachable.
      */
     public String getServiceEnvironment() {
 
@@ -304,51 +310,29 @@ public final class OptClientV1 {
         }
     }
 
+
     /**
-     * Queries the server's {@code /version} endpoint and returns its identification of the running build –
-     * artefact version, build variant, when it was packaged, and the commit it was built from. Returns
-     * {@code "?"} if the server is unreachable.
+     * Checks that the service is reachable and does not consider itself in need of a restart, by calling its
+     * {@code /health} endpoint. That endpoint answers with a status code and no body.
      * <p>
-     * Nothing else the service exposes changes visibly between builds, so this is the way to tell which
-     * deployment you are actually talking to.
-     */
-    public String getServiceVersion() {
-
-        try {
-
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_VERSION)).GET().build();
-
-            HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
-
-            return response.body();
-
-        } catch (Exception cause) {
-            return "?";
-        }
-    }
-
-    /**
-     * Queries the server's {@code /test} endpoint to check that the service is reachable and has at least one
-     * solver available. Returns {@code false} on any error or unexpected response.
+     * Note what this does not tell you. Health reports only what restarting the server would repair, so a
+     * deployment with no native solvers, without a licence key, or still probing its solvers is reported
+     * available – it is working, just not with everything. Ask {@link #getServiceEnvironment()} what it
+     * actually has.
+     * <p>
+     * Returns {@code false} on any error or unexpected response.
      */
     public boolean isServiceAvailable() {
 
         try {
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_TEST)).GET().build();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_HEALTH)).GET().build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            int status = response.statusCode();
 
-                return false;
-
-            } else {
-
-                String body = response.body();
-
-                return body != null && !body.isBlank() && body.contains("[");
-            }
+            return status >= 200 && status < 300;
 
         } catch (Exception cause) {
             return false;
