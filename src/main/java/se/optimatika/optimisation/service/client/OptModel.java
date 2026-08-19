@@ -392,6 +392,10 @@ public final class OptModel {
 
         OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
+        if (result == null) {
+            return new OptResult("FAILED", BigDecimal.ZERO, List.of());
+        }
+
         List<BigDecimal> solution = result.getSolution();
 
         if (result.isFeasible() && solution != null && solution.size() == myVariables.size()) {

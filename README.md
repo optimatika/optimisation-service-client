@@ -1,5 +1,7 @@
 # Optimisation Service Client
 
+[![Maven Central](https://img.shields.io/maven-central/v/se.optimatika/optimisation-service-client)](https://central.sonatype.com/artifact/se.optimatika/optimisation-service-client)
+
 A Java client for the [Optimisation Service](https://optimatika.se/optimisation-service/). Build an LP, QP or MIP model in code, submit it to the service running in your own cluster, and get the result back — all with plain Java and zero dependencies.
 
 This client is the recommended way for Java developers to interact with the Optimisation Service. It is not required — the service also accepts models over plain REST in MPS or LP format — but it is the simplest path from code to solution.
@@ -12,6 +14,16 @@ Without access to a running Optimisation Service instance, this client has nothi
 - **Simple types.** The API uses `BigDecimal`, `String`, `List`, `Map`, and `Future`. No custom exception hierarchies, no generic type parameters, no framework annotations.
 - **Minimal code.** Eight source files, under 1400 lines total. The model builder, HTTP client, and result types are all in a single package.
 - **Java 11+.** Not required to be on the latest Java version.
+
+## Maven coordinates
+
+```xml
+<dependency>
+    <groupId>se.optimatika</groupId>
+    <artifactId>optimisation-service-client</artifactId>
+    <version>0.2.0</version>
+</dependency>
+```
 
 ## Usage
 
