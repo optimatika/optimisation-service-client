@@ -33,9 +33,9 @@ import org.junit.jupiter.api.Test;
  * {@link #measureCapacity()}. Nothing here hard-codes it, and the one test that needs more than one worker
  * says so and skips when there is only one.</li>
  * <li>The licence caps a single solve at 30 seconds once it has a feasible solution and 120 seconds
- * regardless, as {@link OptClientV1#getServiceEnvironment()} reports. So no model stays unsolved forever here,
- * and every window a test waits in has to be short enough that a model meant to still be running actually
- * is.</li>
+ * regardless, as {@link OptClientV1#getServiceEnvironment()} reports. So no model stays unsolved forever
+ * here, and every window a test waits in has to be short enough that a model meant to still be running
+ * actually is.</li>
  * </ul>
  * Each test starts and ends with {@link OptClientV1#abortAll()}, so that "every worker is busy" is something
  * the test set up rather than something it inherited. That purges other clients' solves too – this belongs
@@ -57,8 +57,26 @@ import org.junit.jupiter.api.Test;
 @Tag("integration")
 public class AbortAndCapacityTest {
 
+    /** How many models {@link #measureCapacity()} submits. More than any plausible worker count. */
+    private static final int CAPACITY_MEASUREMENT_SUBMISSIONS = 5;
+
+    /**
+     * How long a quick model is given to find a worker before the server is taken to be at capacity. It
+     * solves in milliseconds once it has one, so this is generous many times over.
+     */
+    private static final long CAPACITY_PROBE_MILLIS = 5_000L;
+
+    /** How long {@link #awaitCapacity()} keeps probing before giving up on the server ever filling up. */
+    private static final long CAPACITY_TIMEOUT_MILLIS = 45_000L;
+
+    /** Objective value of flugpl.mps. */
+    private static final BigDecimal FLUGPL_OPTIMUM = new BigDecimal("1201500");
+
     private static final String HOST = System.getenv("SERVICE_HOST") != null ? System.getenv("SERVICE_HOST")
             : "https://optimatika-boot-services-969062758986.europe-north1.run.app";
+
+    /** How long {@link #clearServer()} waits for the server to actually go idle between tests. */
+    private static final long IDLE_TIMEOUT_MILLIS = 30_000L;
 
     /**
      * How many solves the server runs at once, measured once by {@link #measureCapacity()} before any test
@@ -70,31 +88,49 @@ public class AbortAndCapacityTest {
      */
     private static int NB_CONCURRENT_SOLVES;
 
-    /** How many models {@link #measureCapacity()} submits. More than any plausible worker count. */
-    private static final int CAPACITY_MEASUREMENT_SUBMISSIONS = 5;
-
-    /** Objective value of flugpl.mps. */
-    private static final BigDecimal FLUGPL_OPTIMUM = new BigDecimal("1201500");
+    private static final long POLL_INTERVAL_MILLIS = 250L;
 
     /** Objective value of {@link #quickModel(OptClientV1)}. */
     private static final BigDecimal QUICK_OPTIMUM = new BigDecimal("20");
 
-    /**
-     * How long a quick model is given to find a worker before the server is taken to be at capacity. It
-     * solves in milliseconds once it has one, so this is generous many times over.
-     */
-    private static final long CAPACITY_PROBE_MILLIS = 5_000L;
-
-    /** How long {@link #awaitCapacity()} keeps probing before giving up on the server ever filling up. */
-    private static final long CAPACITY_TIMEOUT_MILLIS = 45_000L;
-
     /** How long a model started through {@link OptModel} is given to reach the server. */
     private static final long SUBMISSION_MILLIS = 15_000L;
 
-    private static final long POLL_INTERVAL_MILLIS = 250L;
+    /**
+     * Measures how many solves the server runs at once, by giving it more than it can take and asking
+     * {@link OptClientV1#abortAll()} how many were running.
+     * <p>
+     * The models are ones that run until the server's own time limit, so none of them can finish early and be
+     * missed by the count, and they are given a moment to be picked up before the question is asked.
+     */
+    @BeforeAll
+    public static void measureCapacity() throws Exception {
 
-    /** How long {@link #clearServer()} waits for the server to actually go idle between tests. */
-    private static final long IDLE_TIMEOUT_MILLIS = 30_000L;
+        OptClientV1 client = new OptClientV1(URI.create(HOST));
+
+        client.abortAll();
+
+        byte[] hard = AbortAndCapacityTest.bytes(AbortAndCapacityTest.newHardModel(client));
+
+        for (int i = 0; i < CAPACITY_MEASUREMENT_SUBMISSIONS; i++) {
+            Assertions.assertNotNull(client.putOnQueueParsed(hard, "EBM", false).get(OptClientV1.KEY), "The server did not accept the submission");
+        }
+
+        Thread.sleep(4_000L);
+
+        Map<String, Object> aborted = client.abortAll();
+
+        NB_CONCURRENT_SOLVES = ((Integer) aborted.get(OptClientV1.ONGOING)).intValue();
+
+        // Only the ongoing count is asserted on. The queued count, and the total, include whatever anyone
+        // else has on the server, so neither can be checked against what this method submitted. The ongoing
+        // count survives that: it is bounded by the number of workers no matter whose solves they are.
+        Assertions.assertTrue(NB_CONCURRENT_SOLVES >= 1, "The server ran nothing at all, so there is no capacity to test against: " + aborted);
+        Assertions.assertTrue(NB_CONCURRENT_SOLVES <= CAPACITY_MEASUREMENT_SUBMISSIONS,
+                "The server ran more solves than were submitted to it, so something else is using it: " + aborted);
+
+        System.out.println("Server runs " + NB_CONCURRENT_SOLVES + " solve(s) at a time");
+    }
 
     /**
      * Polls until the solve is no longer {@code PENDING}, and returns the response it settled on. A timeout
@@ -193,49 +229,13 @@ public class AbortAndCapacityTest {
         }
     }
 
-    /**
-     * Measures how many solves the server runs at once, by giving it more than it can take and asking
-     * {@link OptClientV1#abortAll()} how many were running.
-     * <p>
-     * The models are ones that run until the server's own time limit, so none of them can finish early and be
-     * missed by the count, and they are given a moment to be picked up before the question is asked.
-     */
-    @BeforeAll
-    public static void measureCapacity() throws Exception {
-
-        OptClientV1 client = new OptClientV1(URI.create(HOST));
-
-        client.abortAll();
-
-        byte[] hard = AbortAndCapacityTest.bytes(AbortAndCapacityTest.newHardModel(client));
-
-        for (int i = 0; i < CAPACITY_MEASUREMENT_SUBMISSIONS; i++) {
-            Assertions.assertNotNull(client.putOnQueueParsed(hard, "EBM", false).get(OptClientV1.KEY), "The server did not accept the submission");
-        }
-
-        Thread.sleep(4_000L);
-
-        Map<String, Object> aborted = client.abortAll();
-
-        NB_CONCURRENT_SOLVES = ((Integer) aborted.get(OptClientV1.ONGOING)).intValue();
-
-        // Only the ongoing count is asserted on. The queued count, and the total, include whatever anyone
-        // else has on the server, so neither can be checked against what this method submitted. The ongoing
-        // count survives that: it is bounded by the number of workers no matter whose solves they are.
-        Assertions.assertTrue(NB_CONCURRENT_SOLVES >= 1, "The server ran nothing at all, so there is no capacity to test against: " + aborted);
-        Assertions.assertTrue(NB_CONCURRENT_SOLVES <= CAPACITY_MEASUREMENT_SUBMISSIONS,
-                "The server ran more solves than were submitted to it, so something else is using it: " + aborted);
-
-        System.out.println("Server runs " + NB_CONCURRENT_SOLVES + " solve(s) at a time");
-    }
-
     private OptClientV1 myClient;
 
     /**
      * Leaves the server idle, not merely told to be idle. Aborting is not instantaneous – a solver has to
      * notice the interrupt and its worker has to come back for the next problem – so a single
-     * {@link OptClientV1#abortAll()} can return while the previous test's solve is still winding down, and the
-     * next test would then count it as its own.
+     * {@link OptClientV1#abortAll()} can return while the previous test's solve is still winding down, and
+     * the next test would then count it as its own.
      */
     @BeforeEach
     public void clearServer() throws Exception {
@@ -516,9 +516,8 @@ public class AbortAndCapacityTest {
      * submitted while it runs finishes on its own schedule rather than waiting for the slow one.
      * <p>
      * Overtaking needs a second worker to overtake on. Where the server runs one solve at a time the quick
-     * model can only wait its turn, and that is what
-     * {@link #testSubmissionBeyondCapacityWaitsForIt()} covers instead – so this skips rather than asserting
-     * something the configuration makes impossible.
+     * model can only wait its turn, and that is what {@link #testSubmissionBeyondCapacityWaitsForIt()} covers
+     * instead – so this skips rather than asserting something the configuration makes impossible.
      */
     @Test
     public void testQuickSolveOvertakesSlowOne() throws Exception {
@@ -608,6 +607,17 @@ public class AbortAndCapacityTest {
     }
 
     /**
+     * Waits long enough that a solve started with {@link #startSlowSolve()} has reached the server.
+     * {@link OptModel#minimise()} returns before the model has left the client, and there is nothing to
+     * observe in the meantime – the queue key it would be observed by is exactly what {@link OptModel} does
+     * not expose. So this is a fixed wait, generous for a local serialisation and one HTTP POST, and the
+     * tests that use it say so in their failure messages when it turns out not to have been enough.
+     */
+    private void awaitSubmitted() throws InterruptedException {
+        Thread.sleep(SUBMISSION_MILLIS);
+    }
+
+    /**
      * Fills all but one worker with a model that runs until the server's own time limit, leaving exactly one
      * free for the caller to fill itself. Submitted through {@link OptClientV1}, so these have demonstrably
      * reached the server by the time this returns – which is what makes the one remaining worker the only
@@ -645,17 +655,6 @@ public class AbortAndCapacityTest {
         this.awaitCapacity();
 
         return retVal;
-    }
-
-    /**
-     * Waits long enough that a solve started with {@link #startSlowSolve()} has reached the server.
-     * {@link OptModel#minimise()} returns before the model has left the client, and there is nothing to
-     * observe in the meantime – the queue key it would be observed by is exactly what {@link OptModel} does
-     * not expose. So this is a fixed wait, generous for a local serialisation and one HTTP POST, and the tests
-     * that use it say so in their failure messages when it turns out not to have been enough.
-     */
-    private void awaitSubmitted() throws InterruptedException {
-        Thread.sleep(SUBMISSION_MILLIS);
     }
 
     /**

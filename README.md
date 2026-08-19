@@ -1,8 +1,10 @@
 # Optimisation Service Client
 
-A Java client for [Optimatika's](https://optimatika.se/) optimisation service. Build an LP, QP or MIP model in code, submit it to a remote solver, and get the result back — all with plain Java and zero dependencies.
+A Java client for the [Optimisation Service](https://optimatika.se/optimisation-service/). Build an LP, QP or MIP model in code, submit it to the service running in your own cluster, and get the result back — all with plain Java and zero dependencies.
 
-The optimisation service does not require this – this client simply tries to make things simpler for users of that service. The optimisation server is a paid for service available at AWS, Azure and GCP. Without access to a server instance, this client code is of no use.
+This client is the recommended way for Java developers to interact with the Optimisation Service. It is not required — the service also accepts models over plain REST in MPS or LP format — but it is the simplest path from code to solution.
+
+Without access to a running Optimisation Service instance, this client has nothing to talk to. The service image is public and can be pulled without credentials; a licence key from the [Optimatika Subscription](https://optimatika.se/subscription/) unlocks the full solver suite and additional capacity.
 
 ## Design
 
@@ -125,6 +127,23 @@ ExpressionsBasedModel model = environment.newModel();
 Future<Optimisation.Result> future = model.submit(Optimisation.Sense.MIN);
 Optimisation.Result result = future.get();
 ```
+
+## Examples
+
+Complete, runnable examples — one file per problem type. Each builds a model, solves it against a running Optimisation Service instance, and verifies the result.
+
+| Problem | Type | Source |
+|---|---|---|
+| Diet problem | LP | [DietProblemTest](src/test/java/se/optimatika/optimisation/service/client/example/DietProblemTest.java) |
+| Maximum flow | LP | [MaximumFlowTest](src/test/java/se/optimatika/optimisation/service/client/example/MaximumFlowTest.java) |
+| Shortest path | LP | [ShortestPathTest](src/test/java/se/optimatika/optimisation/service/client/example/ShortestPathTest.java) |
+| Newsvendor (stochastic) | LP | [NewsvendorTest](src/test/java/se/optimatika/optimisation/service/client/example/NewsvendorTest.java) |
+| Portfolio optimisation (Markowitz) | QP / MIQP | [PortfolioOptimisationTest](src/test/java/se/optimatika/optimisation/service/client/example/PortfolioOptimisationTest.java) |
+| Knapsack | MILP | [KnapsackTest](src/test/java/se/optimatika/optimisation/service/client/example/KnapsackTest.java) |
+| Assignment | MILP | [AssignmentProblemTest](src/test/java/se/optimatika/optimisation/service/client/example/AssignmentProblemTest.java) |
+| Bin packing | MILP | [BinPackingTest](src/test/java/se/optimatika/optimisation/service/client/example/BinPackingTest.java) |
+| Travelling salesman (MTZ) | MILP | [TSPTest](src/test/java/se/optimatika/optimisation/service/client/example/TSPTest.java) |
+| Vehicle routing (capacitated) | MILP | [VRPTest](src/test/java/se/optimatika/optimisation/service/client/example/VRPTest.java) |
 
 ## Building
 
