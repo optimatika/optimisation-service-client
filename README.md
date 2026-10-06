@@ -57,7 +57,7 @@ System.out.println("y = " + y.doubleValue());
 | `OptClientV1` | HTTP client — submits models and polls for results |
 | `OptModel` | Model builder — variables, constraints, objective, serialisation |
 | `OptVariable` | Decision variable (real, integer, or binary) |
-| `OptConstraint` | Linear/quadratic constraint with bounds |
+| `OptConstraint` | Linear constraint with bounds |
 | `OptObjective` | Objective function (linear/quadratic) |
 | `OptExpression` | Base for constraints and objective — holds coefficients |
 | `OptResult` | Immutable result — feasible/optimal status, objective value, solution vector |
@@ -79,6 +79,8 @@ The `putOnQueue` and `pollResult` method signatures match ojAlgo's `Optimisation
 2. Calling `maximise()` or `minimise()` serialises the model and POSTs it to the server.
 3. The client polls the server until the solver finishes.
 4. The result is parsed, solution values are written back to the variables, and the `Future<OptResult>` completes.
+
+Where the server supports it, the submit request stays open and the server streams the status over it, so polls are answered from what has already arrived instead of with a request each. If the connection drops, the next poll reconnects with the key. Against a server that does not stream, every poll is a request, as before. Nothing in your code changes either way. A reconnect that reaches a server that does not know the solve — it has expired, or the request landed on another instance — throws `IOException` from `pollResult`; resubmitting is up to you.
 
 Models can also be submitted directly as MPS files via `OptClientV1.putOnQueue()`.
 
@@ -122,6 +124,16 @@ client of that server, not just the one calling it.
 The server solves a fixed number of models at once and queues the rest, so a
 model submitted while the server is at capacity is accepted and given a key but
 produces no result until a slot frees up. Only a full queue is refused outright.
+
+## Licence key
+
+On Optimatika's shared instance, a request with a licence key in force gets the full solver suite and is billed to the key's subscription; without one it runs with the limits of no key. Give the client the key, and it sends it with every request as `Authorization: Bearer <key>` – over HTTPS only:
+
+```java
+OptClientV1 client = OptClientV1.newInstance("https://your-service-host", licenceKey);
+```
+
+A deployment of your own ignores the header: its key is configured on the deployment.
 
 ## Use with ojAlgo
 

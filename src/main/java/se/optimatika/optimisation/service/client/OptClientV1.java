@@ -1,17 +1,22 @@
 package se.optimatika.optimisation.service.client;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.net.CookieManager;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HTTP client wrapper for the Optimisation Service REST API (version {@code v1}).
@@ -27,8 +32,20 @@ import java.util.Objects;
  * {@link #pollResultParsed}) additionally parse the JSON into a {@code Map} and convert the result string to
  * an {@link OptResult}.
  * <p>
+ * Where the service supports it, a solve is followed over one open connection rather than polled for:
+ * {@link #putOnQueue(byte[], String, boolean) putOnQueue} keeps the connection open and the service sends
+ * each change of status as it happens, so {@link #pollResult(String) pollResult} answers from what has
+ * already arrived without asking the service again. A connection that is cut is reopened by the next
+ * {@link #pollResult(String) pollResult}. Against a service that does not stream, each call is one request,
+ * as before. Either way the methods return the same JSON, so callers need not know which it is.
+ * <p>
  * A submitted model can be abandoned again before it finishes – one at a time with {@link #abort(String)}, or
  * all of them at once with {@link #abortAll()}. Either way the solve ends up {@code "DONE"} without a result.
+ * <p>
+ * A client made with a licence key sends it with every request, as {@code Authorization: Bearer <key>}.
+ * Optimatika's shared instance goes by it: with a key in force, a solve gets the full solver suite and is
+ * billed to the key's subscription. Without one it runs with the limits of no key. A deployment of your own
+ * ignores the header – it has its key configured. Send a key only over HTTPS.
  * <p>
  * This class can be used standalone for direct HTTP access, or indirectly through {@link OptModel} which adds
  * model building, serialisation, and result polling on top.
@@ -43,6 +60,53 @@ import java.util.Objects;
  * @see OptModel
  */
 public final class OptClientV1 {
+
+    /**
+     * One solve being followed: the latest event its stream delivered, and whether that stream is still open.
+     * Only the thread reading the stream closes it – the service ends every stream once the solve is done,
+     * aborted included.
+     */
+    private static final class Followed {
+
+        private final BufferedReader myEvents;
+        private volatile String myLatest;
+        private volatile boolean myOpen = true;
+
+        Followed(final BufferedReader events, final String first) {
+            super();
+            myEvents = events;
+            myLatest = first;
+        }
+
+        boolean isOpen() {
+            return myOpen;
+        }
+
+        String latest() {
+            return myLatest;
+        }
+
+        /**
+         * Keeps the latest event until the stream ends – with the solve, or because the connection was cut.
+         */
+        void read() {
+            try {
+                for (String event = OptClientV1.nextEvent(myEvents); event != null; event = OptClientV1.nextEvent(myEvents)) {
+                    myLatest = event;
+                }
+            } catch (IOException cause) {
+                // Cut. Whoever polls next reconnects.
+            } finally {
+                myOpen = false;
+                try {
+                    myEvents.close();
+                } catch (IOException cause) {
+                    // Closed either way.
+                }
+            }
+        }
+
+    }
 
     /**
      * Map key for the queue identifier ({@link String}). Present in every response from both
@@ -66,6 +130,7 @@ public final class OptClientV1 {
      * status is {@code "DONE"} and the server included a result string.
      */
     public static final String RESULT = "result";
+
     /**
      * Map key for the solver status ({@link String}). Always present. The value is {@code "PENDING"} while
      * the solver is still working, or {@code "DONE"} when the solution is ready.
@@ -75,7 +140,10 @@ public final class OptClientV1 {
     private static final String ABORT = "/optimisation/v1/abort/";
 
     private static final String ABORT_ALL = "/optimisation/v1/abort-all";
+    private static final String AUTHORIZATION = "Authorization";
     private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
+    private static final String CONTENT_TYPE = "Content-Type";
+    private static final String EVENT_STREAM = "text/event-stream";
     private static final String FIELD_AVAILABLE = "\"available\"";
     private static final String PATH_ENVIRONMENT = "/optimisation/v1/environment";
     private static final String POLL_RESULT = "/optimisation/v1/poll-result/";
@@ -90,6 +158,52 @@ public final class OptClientV1 {
      */
     public static OptClientV1 newInstance(final String uri) {
         return new OptClientV1(URI.create(uri));
+    }
+
+    /**
+     * Convenience factory that parses the given string as a {@link URI}, for a client that sends a licence
+     * key.
+     *
+     * @param uri        base URI of the optimisation service (scheme + host + port, no path)
+     * @param licenceKey the licence key to send with every request, or null for none
+     * @see #OptClientV1(URI, String)
+     */
+    public static OptClientV1 newInstance(final String uri, final String licenceKey) {
+        return new OptClientV1(URI.create(uri), licenceKey);
+    }
+
+    private static boolean isEventStream(final HttpResponse<?> response) {
+        return response.headers().firstValue(CONTENT_TYPE).map(type -> type.startsWith(EVENT_STREAM)).orElse(Boolean.FALSE).booleanValue();
+    }
+
+    private static boolean isPending(final String json) {
+        return json.contains("\"status\":\"PENDING\"");
+    }
+
+    /**
+     * The data of the next server-sent event, or null once the stream has ended.
+     */
+    private static String nextEvent(final BufferedReader events) throws IOException {
+
+        StringBuilder data = null;
+
+        for (String line = events.readLine(); line != null; line = events.readLine()) {
+
+            if (line.isEmpty()) {
+                if (data != null) {
+                    return data.toString();
+                }
+            } else if (line.startsWith("data:")) {
+                String value = line.startsWith("data: ") ? line.substring(6) : line.substring(5);
+                if (data == null) {
+                    data = new StringBuilder(value);
+                } else {
+                    data.append('\n').append(value);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -177,6 +291,12 @@ public final class OptClientV1 {
         return new OptResult(state, value, solution);
     }
 
+    private static String readAll(final HttpResponse<InputStream> response) throws IOException {
+        try (InputStream body = response.body()) {
+            return new String(body.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
     private static int skipWhitespace(final String json, final int from) {
 
         int retVal = from;
@@ -229,14 +349,33 @@ public final class OptClientV1 {
     }
 
     private final HttpClient myClient;
+    /**
+     * The solves followed over a stream, by key – from the moment one is submitted or reconnected to until
+     * its result has been handed out, or it is aborted.
+     */
+    private final Map<String, Followed> myFollowed = new ConcurrentHashMap<>();
     private final String myHost;
+    /** Sent with every request, or null when there is none. */
+    private final String myLicenceKey;
 
     /**
+     * Without a licence key.
+     *
      * @param host base URI of the optimisation service (scheme + host + port, no path), e.g.
      *             {@code URI.create("https://example.com")}
      * @throws IllegalArgumentException if the URI contains a path
      */
     public OptClientV1(final URI host) {
+        this(host, null);
+    }
+
+    /**
+     * @param host       base URI of the optimisation service (scheme + host + port, no path), e.g.
+     *                   {@code URI.create("https://example.com")}
+     * @param licenceKey the licence key to send with every request, or null (or blank) for none
+     * @throws IllegalArgumentException if the URI contains a path
+     */
+    public OptClientV1(final URI host, final String licenceKey) {
 
         Objects.requireNonNull(host);
 
@@ -245,6 +384,7 @@ public final class OptClientV1 {
         }
 
         myHost = host.toASCIIString();
+        myLicenceKey = licenceKey != null && !licenceKey.isBlank() ? licenceKey.strip() : null;
         myClient = HttpClient.newBuilder().cookieHandler(new CookieManager()).build();
     }
 
@@ -269,9 +409,12 @@ public final class OptClientV1 {
 
         URI uri = URI.create(myHost + ABORT + key);
 
-        HttpRequest request = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.noBody()).build();
+        HttpRequest request = this.newRequest(uri).POST(HttpRequest.BodyPublishers.noBody()).build();
 
         HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+
+        // Its stream ends by itself, now that the solve is done.
+        myFollowed.remove(key);
 
         if (response.statusCode() == 404) {
             return null;
@@ -298,7 +441,7 @@ public final class OptClientV1 {
 
         try {
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + ABORT_ALL)).POST(HttpRequest.BodyPublishers.noBody()).build();
+            HttpRequest request = this.newRequest(URI.create(myHost + ABORT_ALL)).POST(HttpRequest.BodyPublishers.noBody()).build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
@@ -362,7 +505,7 @@ public final class OptClientV1 {
 
         try {
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
+            HttpRequest request = this.newRequest(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
@@ -388,7 +531,7 @@ public final class OptClientV1 {
 
         try {
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
+            HttpRequest request = this.newRequest(URI.create(myHost + PATH_ENVIRONMENT)).GET().build();
 
             HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
@@ -439,24 +582,54 @@ public final class OptClientV1 {
      * The {@code "result"} string follows the format produced by {@code Optimisation.Result.toString()} and
      * can be parsed with {@code Optimisation.Result.parse(String)}.
      * <p>
+     * While the solve is followed over an open stream this returns the latest status received, without a
+     * request. Otherwise it asks the service, and starts following the solve if the service streams.
+     * <p>
      * This method's signature is compatible with ojAlgo's {@code Optimisation.ResultPoller} functional
      * interface.
      *
      * @param key the queue identifier returned by {@link #putOnQueue}
      * @return the raw JSON response body
-     * @throws IOException          if the HTTP request fails
+     * @throws IOException          if the HTTP request fails, or if the service does not know the key – it
+     *                              has forgotten the solve, or the request reached a server instance other
+     *                              than the one solving it. Submitting the model again is up to the caller.
      * @throws InterruptedException if the thread is interrupted while waiting for the response
      * @see #pollResultParsed(String)
      */
     public String pollResult(final String key) throws IOException, InterruptedException {
 
+        Followed followed = myFollowed.get(key);
+
+        if (followed != null) {
+
+            String latest = followed.latest();
+
+            if (!OptClientV1.isPending(latest)) {
+                myFollowed.remove(key, followed);
+                return latest;
+            }
+
+            if (followed.isOpen()) {
+                return latest;
+            }
+        }
+
         String uri = myHost + POLL_RESULT + key;
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(uri)).GET().build();
+        HttpRequest request = this.newRequest(URI.create(uri)).header("Accept", EVENT_STREAM).GET().build();
 
-        HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+        HttpResponse<InputStream> response = myClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
-        return response.body();
+        if (OptClientV1.isEventStream(response)) {
+            return this.follow(response);
+        }
+
+        if (response.statusCode() == 404) {
+            response.body().close();
+            throw new IOException("The service does not know " + key);
+        }
+
+        return OptClientV1.readAll(response);
     }
 
     /**
@@ -504,6 +677,9 @@ public final class OptClientV1 {
      * {@code "status"} is normally {@code "PENDING"} but may be {@code "DONE"} if the solver completes
      * immediately (in which case a {@code "result"} field is also present).
      * <p>
+     * Returns as soon as the model is queued, whether or not the service streams. If it does, the solve is
+     * then followed in the background, for {@link #pollResult(String)} to answer from.
+     * <p>
      * This method's signature is compatible with ojAlgo's {@code Optimisation.ModelSubmitter} functional
      * interface.
      *
@@ -519,11 +695,15 @@ public final class OptClientV1 {
 
         URI uri = URI.create(myHost + PUT_ON_QUEUE + format + "/" + (maximize ? "MAX" : "MIN"));
 
-        HttpRequest request = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build();
+        HttpRequest request = this.newRequest(uri).header("Accept", EVENT_STREAM).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build();
 
-        HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+        HttpResponse<InputStream> response = myClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
-        return response.body();
+        if (OptClientV1.isEventStream(response)) {
+            return this.follow(response);
+        }
+
+        return OptClientV1.readAll(response);
     }
 
     /**
@@ -572,7 +752,7 @@ public final class OptClientV1 {
 
             URI uri = URI.create(myHost + TRANSLATE + inputFormat.toUpperCase() + "/" + outputFormat.toUpperCase());
 
-            HttpRequest request = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build();
+            HttpRequest request = this.newRequest(uri).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build();
 
             HttpResponse<byte[]> response = myClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
 
@@ -585,6 +765,61 @@ public final class OptClientV1 {
         } catch (IOException | InterruptedException cause) {
             throw new RuntimeException(cause);
         }
+    }
+
+    /**
+     * Returns the first event of a stream – the current status – and, unless that already ends the solve,
+     * keeps reading the rest in the background.
+     */
+    private String follow(final HttpResponse<InputStream> response) throws IOException {
+
+        BufferedReader events = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+
+        String first;
+        try {
+            first = OptClientV1.nextEvent(events);
+        } catch (IOException cause) {
+            events.close();
+            throw cause;
+        }
+
+        if (first == null) {
+            events.close();
+            throw new IOException("The stream ended without an event");
+        }
+
+        if (!OptClientV1.isPending(first)) {
+            events.close();
+            return first;
+        }
+
+        String key = (String) OptClientV1.parseResponse(first).get(KEY);
+
+        Followed followed = new Followed(events, first);
+
+        // Replaces one whose stream was cut, or a second stream for the same solve – which ends by itself
+        // with that solve.
+        myFollowed.put(key, followed);
+
+        Thread reader = new Thread(followed::read, "optimisation-stream-" + key);
+        reader.setDaemon(true);
+        reader.start();
+
+        return first;
+    }
+
+    /**
+     * A request to the URI, carrying the licence key if this client has one.
+     */
+    private HttpRequest.Builder newRequest(final URI uri) {
+
+        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri);
+
+        if (myLicenceKey != null) {
+            builder.header(AUTHORIZATION, "Bearer " + myLicenceKey);
+        }
+
+        return builder;
     }
 
 }
