@@ -11,6 +11,8 @@ import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -28,37 +30,35 @@ import org.junit.jupiter.api.Test;
  * <p>
  * Two properties of the server decide what these tests can assume:
  * <ul>
- * <li>It runs {@link #NB_CONCURRENT_SOLVES} solves at once and queues the rest. That number is not exposed by
- * any endpoint and has already changed twice, so it is measured rather than assumed – see
- * {@link #measureCapacity()}. Nothing here hard-codes it, and the one test that needs more than one worker
- * says so and skips when there is only one.</li>
+ * <li>It runs {@link #NB_CONCURRENT_SOLVES} solves at once and queues the rest. That number follows from the
+ * machine it is on, so it is read from the server's environment rather than assumed – see
+ * {@link #readCapacity()}. Nothing here hard-codes it, and the one test that needs more than one worker says
+ * so and skips when there is only one.</li>
  * <li>The licence caps a single solve at 30 seconds once it has a feasible solution and 120 seconds
  * regardless, as {@link OptClientV1#getServiceEnvironment()} reports. So no model stays unsolved forever
  * here, and every window a test waits in has to be short enough that a model meant to still be running
  * actually is.</li>
  * </ul>
- * Each test starts and ends with {@link OptClientV1#abortAll()}, so that "every worker is busy" is something
- * the test set up rather than something it inherited. That purges other clients' solves too – this belongs
- * against a test server.
+ * Each test starts by waiting for the server to be idle, and ends by aborting everything it submitted, so
+ * that "every worker is busy" is something the test set up rather than something it inherited. Against the
+ * shared instance it skips itself: that runs on several instances and serves other users, so there is no one
+ * server to have to itself.
  * <p>
- * <b>One run at a time.</b> These tests work by filling the server up and by clearing it out, so two of them
- * against the same server fight: each one's {@link OptClientV1#abortAll()} throws away the models the other
- * is waiting on, and each one's models occupy workers the other is counting. Running this suite while someone
- * else is running it produces failures that say nothing about the code – typically a capacity wait that times
- * out, or a count that includes a model this run never submitted.
+ * <b>One run at a time.</b> These tests work by filling the server up, so two runs against the same server
+ * fight: each one's models occupy workers the other is counting, and neither ever finds the server idle.
+ * Running this suite while someone else is running it produces failures that say nothing about the code –
+ * typically an idle or capacity wait that times out, or a count that includes a model this run never
+ * submitted.
  * <p>
- * Where a test needs to know that the server is busy, it asks {@link OptClientV1#abortAll()}, which reports
- * the running and queued counts outright. The tempting alternative – offer the server a model that solves in
- * milliseconds and see whether it comes back – does not mean what it looks like it means: this container has
- * two vCPUs, and a hard MILP on one of them starves everything else, so a trivial model can sit unsolved with
- * a worker free. {@link #awaitCapacity()} is still used where the occupying solves are known to have landed,
- * but only ever to confirm, never to establish.
+ * Where a test needs to know how busy the server is, it reads the running and queued counts from the server's
+ * environment. The tempting alternative – offer the server a model that solves in milliseconds and see
+ * whether it comes back – does not mean what it looks like it means: this container has two vCPUs, and a hard
+ * MILP on one of them starves everything else, so a trivial model can sit unsolved with a worker free.
+ * {@link #awaitCapacity()} is still used where the occupying solves are known to have landed, but only ever
+ * to confirm, never to establish.
  */
 @Tag("integration")
 public class AbortAndCapacityTest extends AbstractTest {
-
-    /** How many models {@link #measureCapacity()} submits. More than any plausible worker count. */
-    private static final int CAPACITY_MEASUREMENT_SUBMISSIONS = 5;
 
     /**
      * How long a quick model is given to find a worker before the server is taken to be at capacity. It
@@ -72,16 +72,12 @@ public class AbortAndCapacityTest extends AbstractTest {
     /** Objective value of flugpl.mps. */
     private static final BigDecimal FLUGPL_OPTIMUM = new BigDecimal("1201500");
 
-    /** How long {@link #clearServer()} waits for the server to actually go idle between tests. */
+    /** How long {@link #awaitIdle()} waits for the server to go idle between tests. */
     private static final long IDLE_TIMEOUT_MILLIS = 30_000L;
 
     /**
-     * How many solves the server runs at once, measured once by {@link #measureCapacity()} before any test
-     * runs. Constant for the rest of the run.
-     * <p>
-     * {@code OptimisationServer} derives it from the machine it is on, and nothing serves it over HTTP, so
-     * asking the server to run more solves than it can and counting how many it took is the only way to find
-     * out.
+     * How many solves the server runs at once, read once by {@link #readCapacity()} before any test runs.
+     * Constant for the rest of the run.
      */
     private static int NB_CONCURRENT_SOLVES;
 
@@ -94,37 +90,21 @@ public class AbortAndCapacityTest extends AbstractTest {
     private static final long SUBMISSION_MILLIS = 15_000L;
 
     /**
-     * Measures how many solves the server runs at once, by giving it more than it can take and asking
-     * {@link OptClientV1#abortAll()} how many were running.
-     * <p>
-     * The models are ones that run until the server's own time limit, so none of them can finish early and be
-     * missed by the count, and they are given a moment to be picked up before the question is asked.
+     * Reads how many solves the server runs at once from its environment.
      */
     @BeforeAll
-    public static void measureCapacity() throws Exception {
+    public static void readCapacity() {
 
-        OptClientV1 client = new OptClientV1(URI.create(HOST));
+        String environment = new OptClientV1(URI.create(HOST)).getServiceEnvironment();
 
-        client.abortAll();
+        // Several instances, each with its own workers and queue, and other people's solves on them: there is
+        // no one server to have to itself.
+        Assumptions.assumeFalse(environment.contains("Polar shared instance"),
+                "Not against the shared instance – it runs on several instances and serves other users");
 
-        byte[] hard = AbortAndCapacityTest.bytes(AbortAndCapacityTest.newHardModel(client));
+        NB_CONCURRENT_SOLVES = AbortAndCapacityTest.capacity(environment, "workers");
 
-        for (int i = 0; i < CAPACITY_MEASUREMENT_SUBMISSIONS; i++) {
-            Assertions.assertNotNull(client.putOnQueueParsed(hard, "EBM", false).get(OptClientV1.KEY), "The server did not accept the submission");
-        }
-
-        Thread.sleep(4_000L);
-
-        Map<String, Object> aborted = client.abortAll();
-
-        NB_CONCURRENT_SOLVES = ((Integer) aborted.get(OptClientV1.ONGOING)).intValue();
-
-        // Only the ongoing count is asserted on. The queued count, and the total, include whatever anyone
-        // else has on the server, so neither can be checked against what this method submitted. The ongoing
-        // count survives that: it is bounded by the number of workers no matter whose solves they are.
-        Assertions.assertTrue(NB_CONCURRENT_SOLVES >= 1, "The server ran nothing at all, so there is no capacity to test against: " + aborted);
-        Assertions.assertTrue(NB_CONCURRENT_SOLVES <= CAPACITY_MEASUREMENT_SUBMISSIONS,
-                "The server ran more solves than were submitted to it, so something else is using it: " + aborted);
+        Assertions.assertTrue(NB_CONCURRENT_SOLVES >= 1, "The server runs nothing at all, so there is no capacity to test against: " + environment);
 
         System.out.println("Server runs " + NB_CONCURRENT_SOLVES + " solve(s) at a time");
     }
@@ -155,6 +135,18 @@ public class AbortAndCapacityTest extends AbstractTest {
         } catch (IOException cause) {
             throw new RuntimeException(cause);
         }
+    }
+
+    /**
+     * One count from the {@code capacity} section of the server's environment.
+     */
+    private static int capacity(final String environment, final String field) {
+
+        Matcher matcher = Pattern.compile("\"capacity\":\\{[^}]*\"" + field + "\":(\\d+)").matcher(environment);
+
+        Assertions.assertTrue(matcher.find(), "No capacity." + field + " in the environment – is the server older than this test? " + environment);
+
+        return Integer.parseInt(matcher.group(1));
     }
 
     private static boolean isDone(final OptClientV1 client, final String key) {
@@ -228,71 +220,58 @@ public class AbortAndCapacityTest extends AbstractTest {
 
     private OptClientV1 myClient;
 
+    /** Started through {@link OptModel}, whose queue keys are known only to the {@link Future}. */
+    private final List<Future<OptResult>> mySlowSolves = new ArrayList<>();
+
+    /** The queue key of everything this test submitted through {@link OptClientV1}. */
+    private final List<String> mySubmitted = new ArrayList<>();
+
+    /**
+     * Aborts everything this test submitted, finished or not, so that the next one starts on an idle server.
+     */
+    @AfterEach
+    public void abortOwnSolves() {
+
+        for (String key : mySubmitted) {
+            myClient.abortParsed(key);
+        }
+
+        for (Future<OptResult> solve : mySlowSolves) {
+            String key = ((OptModel.RemoteSolve) solve).key();
+            if (key != null) {
+                myClient.abortParsed(key);
+            }
+        }
+    }
+
     /**
      * Leaves the server idle, not merely told to be idle. Aborting is not instantaneous – a solver has to
-     * notice the interrupt and its worker has to come back for the next problem – so a single
-     * {@link OptClientV1#abortAll()} can return while the previous test's solve is still winding down, and
-     * the next test would then count it as its own.
+     * notice the interrupt and its worker has to come back for the next problem – so the previous test's
+     * solve can still be winding down, and this test would then count it as its own.
      */
     @BeforeEach
-    public void clearServer() throws Exception {
+    public void awaitIdle() throws Exception {
 
         myClient = new OptClientV1(URI.create(HOST));
 
         long deadline = System.currentTimeMillis() + IDLE_TIMEOUT_MILLIS;
 
+        String environment = myClient.getServiceEnvironment();
+
         while (System.currentTimeMillis() < deadline) {
 
-            Map<String, Object> aborted = myClient.abortAll();
-
-            if (((Integer) aborted.get(OptClientV1.QUEUED)).intValue() == 0 && ((Integer) aborted.get(OptClientV1.ONGOING)).intValue() == 0) {
+            if (AbortAndCapacityTest.capacity(environment, "running") == 0 && AbortAndCapacityTest.capacity(environment, "queued") == 0) {
                 return;
             }
 
             Thread.sleep(POLL_INTERVAL_MILLIS);
+
+            environment = myClient.getServiceEnvironment();
         }
 
-        Assertions.fail("The server never went idle, so this test cannot tell its own solves from what it inherited");
-    }
-
-    @AfterEach
-    public void releaseServer() {
-        myClient.abortAll();
-    }
-
-    /**
-     * The counts {@link OptClientV1#abortAll()} reports account for everything the server is holding, split
-     * at the capacity limit: {@link #NB_CONCURRENT_SOLVES} running and the rest still queued.
-     * <p>
-     * The extra models are submitted only once every worker is already occupied for the next two minutes.
-     * That is not merely tidy: a problem is briefly in neither the queue nor the ongoing set while a worker
-     * is picking it up, and {@code abortAll} counts neither collection then. With no worker free to pick
-     * anything up, that window cannot open.
-     */
-    @Test
-    public void testAbortAllCountsQueuedAndOngoing() throws Exception {
-
-        List<String> running = this.occupyEveryWorker();
-
-        int nbQueued = 3;
-        List<String> queued = new ArrayList<>(nbQueued);
-        for (int i = 0; i < nbQueued; i++) {
-            queued.add(this.submit(AbortAndCapacityTest.bytes(AbortAndCapacityTest.newHardModel(myClient))));
-        }
-
-        Map<String, Object> aborted = myClient.abortAll();
-
-        Assertions.assertEquals(NB_CONCURRENT_SOLVES, ((Integer) aborted.get(OptClientV1.ONGOING)).intValue(), "Should have been running at its limit");
-        Assertions.assertEquals(nbQueued, ((Integer) aborted.get(OptClientV1.QUEUED)).intValue(), "The rest should have been waiting in the queue");
-
-        List<String> all = new ArrayList<>(running);
-        all.addAll(queued);
-
-        for (String key : all) {
-            Map<String, Object> response = AbortAndCapacityTest.awaitSettled(myClient, key, 10_000L);
-            Assertions.assertEquals("DONE", response.get(OptClientV1.STATUS), key);
-            Assertions.assertNull(response.get(OptClientV1.RESULT), "An aborted solve must not publish a result");
-        }
+        Assertions.fail("The server never went idle, so this test cannot tell its own solves from what it inherited."
+                + " Something else is solving on it – another run of this suite, or one stopped part way, whose solves"
+                + " end at the server's own time limit: " + environment);
     }
 
     /**
@@ -401,8 +380,8 @@ public class AbortAndCapacityTest extends AbstractTest {
 
     /**
      * Cancelling with {@code mayInterruptIfRunning} set has to reach the server, not just stop the client
-     * polling. {@link OptModel} does not expose the queue key, so what the server is still holding afterwards
-     * is asked of {@link OptClientV1#abortAll()}, which reports it directly.
+     * polling. {@link OptModel} does not expose the queue key, so whether the server stopped is shown by the
+     * worker it frees: a model queued behind the cancelled one gets solved.
      * <p>
      * A solve that never reached the server in the first place would free nothing either, and so would pass
      * this. What rules that out is {@link #testCancelWithoutInterruptLeavesTheServerSolving()}: same setup,
@@ -445,10 +424,10 @@ public class AbortAndCapacityTest extends AbstractTest {
      * the worker is free afterwards.
      * <p>
      * Freeness is established by giving the server a model that solves in milliseconds and requiring it to
-     * come back, rather than by reading a count. {@link OptClientV1#abortAll()} reports how many workers are
-     * holding a problem, which is not the same as how many solves have escaped an abort: an aborted solve
-     * stays counted until its solver notices the interrupt and the worker exits, and on a native solver that
-     * is not immediate.
+     * come back, rather than by reading a count. The environment reports how many workers are holding a
+     * problem, which is not the same as how many solves have escaped an abort: an aborted solve stays counted
+     * until its solver notices the interrupt and the worker exits, and on a native solver that is not
+     * immediate.
      */
     @Test
     public void testCancelBeforeSubmissionCompletes() throws Exception {
@@ -506,6 +485,31 @@ public class AbortAndCapacityTest extends AbstractTest {
 
         Assertions.assertEquals("PENDING", settled.get(OptClientV1.STATUS), "cancel(false) should not have freed the worker, but the queued solve got one"
                 + " - either the abort was sent when it should not have been, or the cancelled model never reached the server");
+    }
+
+    /**
+     * The counts the server's environment reports account for everything it is holding, split at the capacity
+     * limit: {@link #NB_CONCURRENT_SOLVES} running and the rest still queued.
+     * <p>
+     * The extra models are submitted only once every worker is already occupied for the next two minutes, so
+     * that none of them can be on its way from the queue to a worker when the counts are read.
+     */
+    @Test
+    public void testEnvironmentCountsRunningAndQueued() throws Exception {
+
+        this.occupyEveryWorker();
+
+        int nbQueued = 3;
+        for (int i = 0; i < nbQueued; i++) {
+            this.submit(AbortAndCapacityTest.bytes(AbortAndCapacityTest.newHardModel(myClient)));
+        }
+
+        String environment = myClient.getServiceEnvironment();
+
+        Assertions.assertEquals(NB_CONCURRENT_SOLVES, AbortAndCapacityTest.capacity(environment, "running"),
+                "Should have been running at its limit: " + environment);
+        Assertions.assertEquals(nbQueued, AbortAndCapacityTest.capacity(environment, "queued"),
+                "The rest should have been waiting in the queue: " + environment);
     }
 
     /**
@@ -661,7 +665,12 @@ public class AbortAndCapacityTest extends AbstractTest {
      * still in flight.
      */
     private Future<OptResult> startSlowSolve() {
-        return AbortAndCapacityTest.newHardModel(myClient).minimise();
+
+        Future<OptResult> retVal = AbortAndCapacityTest.newHardModel(myClient).minimise();
+
+        mySlowSolves.add(retVal);
+
+        return retVal;
     }
 
     private String submit(final byte[] model) {
@@ -673,6 +682,8 @@ public class AbortAndCapacityTest extends AbstractTest {
         String key = (String) myClient.putOnQueueParsed(model, format, false).get(OptClientV1.KEY);
 
         Assertions.assertNotNull(key, "The server did not accept the submission");
+
+        mySubmitted.add(key);
 
         return key;
     }

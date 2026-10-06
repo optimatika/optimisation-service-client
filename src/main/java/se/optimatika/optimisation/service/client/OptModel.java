@@ -79,7 +79,7 @@ public final class OptModel {
      * Cancelling before the model has even been submitted works too: the abort is sent as soon as the server
      * hands back a key.
      */
-    private static final class RemoteSolve extends CompletableFuture<OptResult> {
+    static final class RemoteSolve extends CompletableFuture<OptResult> {
 
         private final AtomicBoolean myAbortSent = new AtomicBoolean(false);
         private volatile boolean myAbortWanted = false;
@@ -127,6 +127,14 @@ public final class OptModel {
             if (myAbortWanted && key != null && myAbortSent.compareAndSet(false, true)) {
                 myClient.abortParsed(key);
             }
+        }
+
+        /**
+         * The queue key, once the server has handed it back – null until then. Not public: a solve started
+         * here is followed and cancelled through the {@link Future}, and this is for this package's tests.
+         */
+        String key() {
+            return myKey;
         }
 
         void setKey(final String key) {
