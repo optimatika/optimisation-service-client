@@ -57,7 +57,7 @@ System.out.println("y = " + y.doubleValue());
 | `OptClientV1` | HTTP client — submits models and polls for results |
 | `OptModel` | Model builder — variables, constraints, objective, serialisation |
 | `OptVariable` | Decision variable (real, integer, or binary) |
-| `OptConstraint` | Linear/quadratic constraint with bounds |
+| `OptConstraint` | Linear constraint with bounds |
 | `OptObjective` | Objective function (linear/quadratic) |
 | `OptExpression` | Base for constraints and objective — holds coefficients |
 | `OptResult` | Immutable result — feasible/optimal status, objective value, solution vector |
