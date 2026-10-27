@@ -30,8 +30,10 @@
     </developers>
     <scm>
         <url>https://github.com/optimatika/optimisation-service-client</url>
-        <connection>https://github.com/optimatika/optimisation-service-client.git</connection>
-        <developerConnection>git@github.com:optimatika/optimisation-service-client.git</developerConnection>
+        <connection>
+            https://github.com/optimatika/optimisation-service-client.git</connection>
+        <developerConnection>
+            git@github.com:optimatika/optimisation-service-client.git</developerConnection>
     </scm>
     <issueManagement>
         <url>https://github.com/optimatika/optimisation-service-client/issues</url>
@@ -45,6 +47,8 @@
     </distributionManagement>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss'Z'</maven.build.timestamp.format>
+        <project.build.outputTimestamp>${maven.build.timestamp}</project.build.outputTimestamp>
         <java.version>11</java.version>
     </properties>
     <dependencies>
