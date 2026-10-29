@@ -80,6 +80,8 @@ The `putOnQueue` and `pollResult` method signatures match ojAlgo's `Optimisation
 3. The client polls the server until the solver finishes.
 4. The result is parsed, solution values are written back to the variables, and the `Future<OptResult>` completes.
 
+Where the server supports it, the submit request stays open and the server streams the status over it, so polls are answered from what has already arrived instead of with a request each. If the connection drops, the next poll reconnects with the key. Against a server that does not stream, every poll is a request, as before. Nothing in your code changes either way. A reconnect that reaches a server that does not know the solve — it has expired, or the request landed on another instance — throws `IOException` from `pollResult`; resubmitting is up to you.
+
 Models can also be submitted directly as MPS files via `OptClientV1.putOnQueue()`.
 
 ## Aborting
