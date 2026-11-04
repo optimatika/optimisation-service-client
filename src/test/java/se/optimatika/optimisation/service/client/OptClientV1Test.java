@@ -19,6 +19,12 @@ public class OptClientV1Test extends AbstractTest {
         }
     }
 
+    /**
+     * Objective values are compared within this, not exactly: the last digits depend on how many threads the
+     * server gives the solver.
+     */
+    private static final double TOLERANCE = 1E-6;
+
     private static Map<String, Object> solveViaMps(final OptClientV1 client, final String resourcePath, final boolean maximize) throws Exception {
 
         byte[] mpsData = OptClientV1Test.readResource(resourcePath);
@@ -241,7 +247,7 @@ public class OptClientV1Test extends AbstractTest {
 
         Assertions.assertTrue(result.isFeasible());
         Assertions.assertTrue(result.isOptimal());
-        Assertions.assertTrue(new BigDecimal("202.35").compareTo(result.getValue()) == 0);
+        Assertions.assertEquals(202.35, result.getValue().doubleValue(), TOLERANCE);
     }
 
     /**
@@ -256,7 +262,7 @@ public class OptClientV1Test extends AbstractTest {
         Map<String, Object> response = OptClientV1Test.solveViaMps(client, "optimisation/MIPLIB/gr4x6.mps", false);
         OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
-        Assertions.assertEquals(0, new BigDecimal("202.35").compareTo(result.getValue()));
+        Assertions.assertEquals(202.35, result.getValue().doubleValue(), TOLERANCE);
         Assertions.assertNotNull(result.getSolution());
     }
 
@@ -292,7 +298,7 @@ public class OptClientV1Test extends AbstractTest {
         OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
         Assertions.assertTrue(result.isFeasible());
-        Assertions.assertTrue(result.getValue().compareTo(new BigDecimal("11")) >= 0);
+        Assertions.assertTrue(result.getValue().doubleValue() >= 11.0 - TOLERANCE, () -> "Below the optimum: " + result.getValue());
         Assertions.assertNotNull(result.getSolution());
     }
 
@@ -315,8 +321,9 @@ public class OptClientV1Test extends AbstractTest {
     }
 
     /**
-     * The test server rejects models with more than 100 variables. Submitting one should return immediately
-     * with a failed (not feasible) result.
+     * Without a licence key a server rejects models with more than 1,000 variables, or fewer where it is set
+     * lower – 100 on the public test server. Submitting one should return immediately with a failed (not
+     * feasible) result.
      */
     @Test
     public void testTooManyVariables() throws InterruptedException, ExecutionException {
@@ -325,7 +332,7 @@ public class OptClientV1Test extends AbstractTest {
 
         OptModel model = new OptModel(client);
 
-        OptVariable[] vars = new OptVariable[101];
+        OptVariable[] vars = new OptVariable[1_001];
         for (int i = 0; i < vars.length; i++) {
             vars[i] = model.newRealVariable("X" + i).lower(0);
         }

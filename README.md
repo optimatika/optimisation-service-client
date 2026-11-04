@@ -117,13 +117,11 @@ nothing to read. Other solves are untouched, whether they are already running or
 still waiting in the queue. Aborting a solve that has already finished is a
 no-op: it keeps its result.
 
-`abortAll()` does the same to everything the server currently holds, and reports
-how many solves it stopped, split into `QUEUED` and `ONGOING`. It affects every
-client of that server, not just the one calling it.
-
 The server solves a fixed number of models at once and queues the rest, so a
 model submitted while the server is at capacity is accepted and given a key but
 produces no result until a slot frees up. Only a full queue is refused outright.
+`getServiceEnvironment()` reports that number, and how many solves are running and
+queued right now, under `capacity`.
 
 ## Licence key
 

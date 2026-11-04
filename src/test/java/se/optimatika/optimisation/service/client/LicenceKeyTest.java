@@ -36,7 +36,6 @@ class LicenceKeyTest {
         client.putOnQueue(new byte[] { 1 }, "EBM", false);
         client.pollResult("k1");
         client.abort("k1");
-        client.abortAll();
         client.getServiceEnvironment();
         client.isServiceAvailable();
         client.translate(new byte[] { 1 }, "EBM", "MPS");
@@ -49,8 +48,7 @@ class LicenceKeyTest {
         myServer.createContext("/", exchange -> {
             String authorization = exchange.getRequestHeaders().getFirst("Authorization");
             myAuthorizations.add(authorization != null ? authorization : "none");
-            String path = exchange.getRequestURI().getPath();
-            byte[] body = (path.endsWith("abort-all") ? "{\"queued\":0,\"ongoing\":0}" : DONE).getBytes(StandardCharsets.UTF_8);
+            byte[] body = DONE.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream out = exchange.getResponseBody()) {
@@ -70,7 +68,7 @@ class LicenceKeyTest {
 
         this.useEveryEndpoint(new OptClientV1(this.host(), KEY));
 
-        Assertions.assertEquals(7, myAuthorizations.size(), myAuthorizations.toString());
+        Assertions.assertEquals(6, myAuthorizations.size(), myAuthorizations.toString());
         Assertions.assertTrue(myAuthorizations.stream().allMatch(("Bearer " + KEY)::equals), myAuthorizations.toString());
     }
 
@@ -80,7 +78,7 @@ class LicenceKeyTest {
         this.useEveryEndpoint(OptClientV1.newInstance(this.host().toString()));
         this.useEveryEndpoint(OptClientV1.newInstance(this.host().toString(), " "));
 
-        Assertions.assertEquals(14, myAuthorizations.size(), myAuthorizations.toString());
+        Assertions.assertEquals(12, myAuthorizations.size(), myAuthorizations.toString());
         Assertions.assertTrue(myAuthorizations.stream().allMatch("none"::equals), myAuthorizations.toString());
     }
 

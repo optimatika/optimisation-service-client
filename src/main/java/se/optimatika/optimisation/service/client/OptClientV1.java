@@ -39,8 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link #pollResult(String) pollResult}. Against a service that does not stream, each call is one request,
  * as before. Either way the methods return the same JSON, so callers need not know which it is.
  * <p>
- * A submitted model can be abandoned again before it finishes – one at a time with {@link #abort(String)}, or
- * all of them at once with {@link #abortAll()}. Either way the solve ends up {@code "DONE"} without a result.
+ * A submitted model can be abandoned again before it finishes, with {@link #abort(String)}. The solve then
+ * ends up {@code "DONE"} without a result.
  * <p>
  * A client made with a licence key sends it with every request, as {@code Authorization: Bearer <key>}.
  * Optimatika's shared instance goes by it: with a key in force, a solve gets the full solver suite and is
@@ -115,16 +115,6 @@ public final class OptClientV1 {
      */
     public static final String KEY = "key";
     /**
-     * Map key for the number of already running solves that {@link #abortAll()} stopped ({@link Integer}).
-     * Present only in the map returned by {@link #abortAll()}.
-     */
-    public static final String ONGOING = "ongoing";
-    /**
-     * Map key for the number of not yet started solves that {@link #abortAll()} took off the queue
-     * ({@link Integer}). Present only in the map returned by {@link #abortAll()}.
-     */
-    public static final String QUEUED = "queued";
-    /**
      * Map key for the parsed solver result ({@link OptResult}). Present only in maps returned by
      * {@link #pollResultParsed} (or {@link #putOnQueueParsed} if the solver completes immediately) when the
      * status is {@code "DONE"} and the server included a result string.
@@ -139,7 +129,6 @@ public final class OptClientV1 {
 
     private static final String ABORT = "/optimisation/v1/abort/";
 
-    private static final String ABORT_ALL = "/optimisation/v1/abort-all";
     private static final String AUTHORIZATION = "Authorization";
     private static final HttpResponse.BodyHandler<String> BODY_HANDLER = HttpResponse.BodyHandlers.ofString();
     private static final String CONTENT_TYPE = "Content-Type";
@@ -204,32 +193,6 @@ public final class OptClientV1 {
         }
 
         return null;
-    }
-
-    /**
-     * Reads one unquoted integer field out of a flat JSON object. {@link #parseResponse} cannot be used for
-     * the abort-all response because it assumes every value is a quoted string.
-     */
-    private static int parseCount(final String json, final String field) {
-
-        String member = '"' + field + "\":";
-
-        int start = json.indexOf(member);
-
-        if (start < 0) {
-            throw new RuntimeException("No '" + field + "' in: " + json);
-        }
-
-        int first = start + member.length();
-        int limit = first;
-        if (limit < json.length() && json.charAt(limit) == '-') {
-            limit++;
-        }
-        while (limit < json.length() && Character.isDigit(json.charAt(limit))) {
-            limit++;
-        }
-
-        return Integer.parseInt(json.substring(first, limit));
     }
 
     /**
@@ -421,45 +384,6 @@ public final class OptClientV1 {
         }
 
         return response.body();
-    }
-
-    /**
-     * Purges the queue and aborts every ongoing solve – {@link #abort(String)} applied to everything the
-     * server currently holds. Solves that have already finished keep their results.
-     * <p>
-     * The returned map has two entries, both {@link Integer}:
-     * <ul>
-     * <li>{@link #QUEUED} — how many solves were taken off the queue without ever starting</li>
-     * <li>{@link #ONGOING} — how many solves were already running and were interrupted</li>
-     * </ul>
-     * This affects every client of the server, not just this one.
-     *
-     * @return the queued and ongoing counts abandoned
-     * @throws RuntimeException if the request fails or the response cannot be read
-     */
-    public Map<String, Object> abortAll() {
-
-        try {
-
-            HttpRequest request = this.newRequest(URI.create(myHost + ABORT_ALL)).POST(HttpRequest.BodyPublishers.noBody()).build();
-
-            HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
-
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Abort-all failed with status " + response.statusCode());
-            }
-
-            String body = response.body();
-
-            Map<String, Object> retVal = new LinkedHashMap<>();
-            retVal.put(QUEUED, Integer.valueOf(OptClientV1.parseCount(body, QUEUED)));
-            retVal.put(ONGOING, Integer.valueOf(OptClientV1.parseCount(body, ONGOING)));
-
-            return retVal;
-
-        } catch (IOException | InterruptedException cause) {
-            throw new RuntimeException(cause);
-        }
     }
 
     /**
