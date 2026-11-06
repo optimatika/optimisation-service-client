@@ -17,14 +17,29 @@ the project uses [Semantic Versioning](https://semver.org/).
 - **Streamed status.** Where the service supports it, `putOnQueue` keeps the
   request open and the service sends each change of status over it, so
   `pollResult` answers from what has already arrived. A connection that is cut
-  is reopened by the next `pollResult`, with the key. Against a service that
-  does not stream, each call is one request, as before.
+  is reopened by the next `pollResult`, with the key. `abort` closes the
+  stream first, so that an abort that reaches another instance still tells the
+  one solving it that nobody follows the solve – where nothing in between keeps
+  the stream open, as Cloud Run does. Against a service that does not stream,
+  each call is one request, as before.
 
 ### Changed
 
+- `cancel(true)` on the `Future` from `OptModel` no longer waits for the
+  abort: it is sent in the background. If it reaches a service instance that
+  does not know the solve, it is sent again after 1 s, 2 s, 4 s and so on, at
+  most 2 minutes apart, for up to 10 minutes. If none gets there, a warning is
+  logged through `System.Logger`, and the solve runs on until it finishes or
+  reaches its time limit. The model is never submitted again.
 - `pollResult` throws `IOException` when the service does not know the solve –
   it has expired, or a reconnect reached another instance. It used to return
   the error response as if it were a status.
+- The `Future` from `OptModel` completes exceptionally, with an `IOException`
+  as the cause, when the service cannot be reached, does not accept the model,
+  or no longer knows the solve. It used to complete with a result that was not
+  feasible, as if the solver had failed. The model is not submitted again;
+  that is up to you. A model the service refuses, for its size say, still
+  completes with a result that is not feasible.
 
 ### Deprecated
 

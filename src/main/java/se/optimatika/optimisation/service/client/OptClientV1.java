@@ -63,19 +63,35 @@ public final class OptClientV1 {
 
     /**
      * One solve being followed: the latest event its stream delivered, and whether that stream is still open.
-     * Only the thread reading the stream closes it – the service ends every stream once the solve is done,
-     * aborted included.
+     * The service ends the stream once the solve is done, aborted included. {@link #abort(String)} closes it
+     * too, whatever the answer: an abort that reached another instance of the service aborts nothing there,
+     * and a closed stream is then what tells the instance solving it that nobody follows it any longer.
      */
     private static final class Followed {
 
+        private final InputStream myBody;
         private final BufferedReader myEvents;
         private volatile String myLatest;
         private volatile boolean myOpen = true;
 
-        Followed(final BufferedReader events, final String first) {
+        Followed(final InputStream body, final BufferedReader events, final String first) {
             super();
+            myBody = body;
             myEvents = events;
             myLatest = first;
+        }
+
+        /**
+         * Closes the connection, and with it ends {@link #read()}. The response body is closed, not the reader:
+         * the reading thread holds the reader's lock while it waits for the next event, which can be 15 s away.
+         */
+        void close() {
+            myOpen = false;
+            try {
+                myBody.close();
+            } catch (IOException cause) {
+                // Closed either way.
+            }
         }
 
         boolean isOpen() {
@@ -215,7 +231,7 @@ public final class OptClientV1 {
      * The fields of a queue response, every value a quoted string – which the three endpoints answering with
      * one only ever send. A {@link #RESULT} is replaced by the {@link OptResult} it describes.
      */
-    private static Map<String, Object> parseResponse(final String json) {
+    static Map<String, Object> parseResponse(final String json) {
 
         Map<String, Object> map = new LinkedHashMap<>();
 
@@ -376,6 +392,12 @@ public final class OptClientV1 {
      * are left alone.
      * <p>
      * Aborting a solve that has already finished is a no-op: it stays {@code "DONE"} and keeps its result.
+     * <p>
+     * The client stops following the solve as well, and closes its stream, whatever the answer. On a service
+     * that runs as several instances the abort may reach one that does not know the solve, and return
+     * {@code null}. On a service with a grace period, the closed stream then tells the instance solving it,
+     * which aborts it once that has run out – unless something between client and service keeps the stream
+     * open, as Cloud Run does. Then the solve runs on until it finishes or reaches its time limit.
      *
      * @param key the queue identifier returned by {@link #putOnQueue}
      * @return the raw JSON response body, or {@code null} if the server does not know this key, which
@@ -390,10 +412,15 @@ public final class OptClientV1 {
 
         HttpRequest request = this.newRequest(uri).POST(HttpRequest.BodyPublishers.noBody()).build();
 
-        HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
+        // Closed first, so that it does not wait on the abort's answer. Should the abort reach another instance,
+        // or fail, the closed stream is left to tell the right one – which then aborts the solve once its grace
+        // period runs out, where nothing between client and server hides the close.
+        Followed followed = myFollowed.remove(key);
+        if (followed != null) {
+            followed.close();
+        }
 
-        // Its stream ends by itself, now that the solve is done.
-        myFollowed.remove(key);
+        HttpResponse<String> response = myClient.send(request, BODY_HANDLER);
 
         if (response.statusCode() == 404) {
             return null;
@@ -727,7 +754,8 @@ public final class OptClientV1 {
      */
     private String follow(final HttpResponse<InputStream> response) throws IOException {
 
-        BufferedReader events = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+        InputStream body = response.body();
+        BufferedReader events = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8));
 
         String first;
         try {
@@ -749,7 +777,7 @@ public final class OptClientV1 {
 
         String key = (String) OptClientV1.parseResponse(first).get(KEY);
 
-        Followed followed = new Followed(events, first);
+        Followed followed = new Followed(body, events, first);
 
         // Replaces one whose stream was cut, or a second stream for the same solve – which ends by itself
         // with that solve.

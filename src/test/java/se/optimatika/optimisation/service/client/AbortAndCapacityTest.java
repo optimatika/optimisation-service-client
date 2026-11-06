@@ -34,15 +34,18 @@ import org.junit.jupiter.api.Test;
  * machine it is on, so it is read from the server's environment rather than assumed – see
  * {@link #readCapacity()}. Nothing here hard-codes it, and the one test that needs more than one worker says
  * so and skips when there is only one.</li>
- * <li>The licence caps a single solve at 30 seconds once it has a feasible solution and 120 seconds
- * regardless, as {@link OptClientV1#getServiceEnvironment()} reports. So no model stays unsolved forever
- * here, and every window a test waits in has to be short enough that a model meant to still be running
- * actually is.</li>
+ * <li>The server stops a solve at its time limits: without a licence key after 60 seconds, or after 30 once it
+ * has a feasible solution; licensed, by default after 24 hours, or one hour once it has one. So no model stays
+ * unsolved forever here, and every window a test waits in is kept well under a minute, so that a model meant
+ * to still be running actually is.</li>
  * </ul>
  * Each test starts by waiting for the server to be idle, and ends by aborting everything it submitted, so
  * that "every worker is busy" is something the test set up rather than something it inherited. Against the
  * shared instance it skips itself: that runs on several instances and serves other users, so there is no one
- * server to have to itself.
+ * server to have to itself. Run it against a server of your own, with {@code SERVICE_HOST} – a container
+ * started with {@code docker run --rm -p 8080:8080 ghcr.io/optimatika/optimisation-service}, say, and
+ * {@code SERVICE_HOST=http://localhost:8080}. Without a licence key that server solves one model at a time, and
+ * the one test that needs more skips itself.
  * <p>
  * <b>One run at a time.</b> These tests work by filling the server up, so two runs against the same server
  * fight: each one's models occupy workers the other is counting, and neither ever finds the server idle.
@@ -52,8 +55,8 @@ import org.junit.jupiter.api.Test;
  * <p>
  * Where a test needs to know how busy the server is, it reads the running and queued counts from the server's
  * environment. The tempting alternative – offer the server a model that solves in milliseconds and see
- * whether it comes back – does not mean what it looks like it means: this container has two vCPUs, and a hard
- * MILP on one of them starves everything else, so a trivial model can sit unsolved with a worker free.
+ * whether it comes back – does not mean what it looks like it means: on a server with few CPUs a hard MILP can
+ * starve everything else, so a trivial model can sit unsolved with a worker free.
  * {@link #awaitCapacity()} is still used where the occupying solves are known to have landed, but only ever
  * to confirm, never to establish.
  */
@@ -156,11 +159,12 @@ public class AbortAndCapacityTest extends AbstractTest {
     /**
      * Market split: equality constraints over binary variables with a right-hand side of half the coefficient
      * sum. Infeasible, and famously hard to prove so – branch and bound has to exhaust the tree. Unlike
-     * {@code ej.mps} it never finds a feasible solution, so the 30 second suffice limit never applies to it
-     * and it runs until the 120 second abort limit. That longer window is what the capacity tests need.
+     * {@code ej.mps} it never finds a feasible solution, so the shorter limit, for a solve that has one, never
+     * applies to it, and it runs until the server's abort limit – 60 seconds without a licence key. That
+     * longer window is what the capacity tests need.
      * <p>
-     * At 60 variables it is also over the size at which the server hands a MILP to a native solver, so these
-     * tests abort SCIP or HiGHS rather than the built-in solver.
+     * At 60 variables it is also above the size at which a licensed server hands a MILP to a native solver,
+     * HiGHS or SCIP. There these tests abort a native solver rather than the built-in one.
      */
     private static OptModel newHardModel(final OptClientV1 client) {
 
@@ -297,8 +301,8 @@ public class AbortAndCapacityTest extends AbstractTest {
     }
 
     /**
-     * Requirement 1, the "without disturbing anything else" half. Every worker is put on a model that runs
-     * for minutes and a quick one is left waiting in the queue. Aborting one of the running solves must leave
+     * Aborting one solve disturbs nothing else. Every worker is put on a model that runs until the server's
+     * time limit, and a quick one is left waiting in the queue. Aborting one of the running solves must leave
      * the other running and the queued one intact – and the worker it frees must be fit for use, which the
      * queued model then being solved correctly proves.
      */
@@ -332,8 +336,8 @@ public class AbortAndCapacityTest extends AbstractTest {
     }
 
     /**
-     * Requirement 1, the ongoing half: a solve that would run far longer than the caller is willing to wait
-     * can be stopped, and stops promptly. It ends {@code DONE} with no result – whatever partial solution the
+     * A solve that would run far longer than the caller is willing to wait can be stopped, and stops
+     * promptly. It ends {@code DONE} with no result – whatever partial solution the
      * solver had is discarded, so a poll finds nothing to read.
      * <p>
      * Uses {@code ej.mps}: three integer variables and one equality constraint, which branch and bound takes
@@ -366,10 +370,7 @@ public class AbortAndCapacityTest extends AbstractTest {
 
     /**
      * Aborting a key the server has never seen is reported as such rather than silently accepted. Keys whose
-     * results have expired look the same.
-     * <p>
-     * Note that {@code poll-result} does not make this distinction – it answers {@code PENDING} for a key it
-     * has never issued – so aborting is the only way to ask whether a key means anything.
+     * results have expired look the same. Polling one is refused the same way, with an {@code IOException}.
      */
     @Test
     public void testAbortUnknownKey() throws Exception {
@@ -491,8 +492,8 @@ public class AbortAndCapacityTest extends AbstractTest {
      * The counts the server's environment reports account for everything it is holding, split at the capacity
      * limit: {@link #NB_CONCURRENT_SOLVES} running and the rest still queued.
      * <p>
-     * The extra models are submitted only once every worker is already occupied for the next two minutes, so
-     * that none of them can be on its way from the queue to a worker when the counts are read.
+     * The extra models are submitted only once every worker is already occupied until the server's time limit,
+     * so that none of them can be on its way from the queue to a worker when the counts are read.
      */
     @Test
     public void testEnvironmentCountsRunningAndQueued() throws Exception {
@@ -513,8 +514,8 @@ public class AbortAndCapacityTest extends AbstractTest {
     }
 
     /**
-     * Requirement 2: one very slow solve does not stop another model being submitted, and a quick model
-     * submitted while it runs finishes on its own schedule rather than waiting for the slow one.
+     * One very slow solve does not stop another model being submitted, and a quick model submitted while it
+     * runs finishes on its own schedule rather than waiting for the slow one.
      * <p>
      * Overtaking needs a second worker to overtake on. Where the server runs one solve at a time the quick
      * model can only wait its turn, and that is what {@link #testSubmissionBeyondCapacityWaitsForIt()} covers
@@ -543,8 +544,8 @@ public class AbortAndCapacityTest extends AbstractTest {
     }
 
     /**
-     * Requirement 3: with every worker already taken, a further submission is accepted and given a key, but
-     * no worker takes it – so it produces no result for as long as the others hold the workers.
+     * With every worker already taken, a further submission is accepted and given a key, but no worker takes
+     * it – so it produces no result for as long as the others hold the workers.
      * <p>
      * The submission is not rejected. The server only refuses once the queue itself is full, which is a fixed
      * depth per worker, and answers that with HTTP 429 rather than a key.
@@ -583,8 +584,8 @@ public class AbortAndCapacityTest extends AbstractTest {
      * is taken off the queue again afterwards, so none of them stands in the way of what the test does next.
      * <p>
      * Only ever called with occupying solves that have already been accepted by the server, because a probe
-     * that stays {@code PENDING} does not prove on its own that no worker is free – on two vCPUs a running
-     * hard MILP starves a trivial one badly enough to look the same. With the occupying solves known to be
+     * that stays {@code PENDING} does not prove on its own that no worker is free – on a server with few CPUs
+     * a running hard MILP can starve a trivial one badly enough to look the same. With the occupying solves known to be
      * there, this is confirmation that they are being worked on rather than merely accepted.
      */
     private void awaitCapacity() throws Exception {

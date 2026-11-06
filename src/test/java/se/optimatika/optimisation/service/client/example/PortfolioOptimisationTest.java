@@ -35,7 +35,8 @@ public class PortfolioOptimisationTest {
      *
      * Target return >= 0.09. Weights in [0, 1], sum = 1.
      * <p>
-     * Optimal variance approximately 0.0196, achieved with w1~0.345, w2~0.345, w3~0.310.
+     * The return target is binding at the optimum: variance about 0.0259, with w1 ≈ 0.444, w2 ≈ 0.381 and
+     * w3 ≈ 0.175.
      */
     @Test
     public void testPortfolioOptimisation() throws InterruptedException, ExecutionException {
@@ -87,7 +88,7 @@ public class PortfolioOptimisationTest {
         OptVariable.IntegerVariable u2 = model.newIntegerVariable("u2").lower(0).upper(100);
         OptVariable.IntegerVariable u3 = model.newIntegerVariable("u3").lower(0).upper(100);
 
-        // Objective: minimise portfolio variance (scaled by 1/10000 since units are 100x weights)
+        // Objective: minimise portfolio variance – 10,000 times the variance of the weights, as units are 100 times weights
         OptObjective obj = model.objective();
         obj.set(u1, u1, 0.04);
         obj.set(u2, u2, 0.09);

@@ -7,10 +7,20 @@ import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Solves models on a real Optimisation Service – Optimatika's shared instance unless {@code SERVICE_HOST}
+ * names another (see {@link AbstractTest}) – through both {@link OptModel} and {@link OptClientV1} directly,
+ * with models built in code and read from MPS files.
+ */
+@Tag("integration")
 public class OptClientV1Test extends AbstractTest {
 
     /**
@@ -43,12 +53,16 @@ public class OptClientV1Test extends AbstractTest {
         return response;
     }
 
+    /**
+     * The lower layer on its own: a model exported as EBM, submitted with {@link OptClientV1#putOnQueueParsed},
+     * and polled for with {@link OptClientV1#pollResultParsed} until it is done.
+     */
     @Test
     public void testClientPutOnQueueAndPollResult() throws Exception {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
@@ -58,7 +72,18 @@ public class OptClientV1Test extends AbstractTest {
         model.objective().set(varA, 10).set(varB, -10);
 
         Map<String, Object> response = client.putOnQueueParsed(model.exportModel("EBM").readAllBytes(), "EBM", true);
-        Assertions.assertTrue(response.containsKey(OptClientV1.KEY));
+        String key = (String) response.get(OptClientV1.KEY);
+        Assertions.assertNotNull(key, "No key: " + response);
+
+        for (int attempt = 0; attempt < 100 && "PENDING".equals(response.get(OptClientV1.STATUS)); attempt++) {
+            Thread.sleep(100L);
+            response = client.pollResultParsed(key);
+        }
+
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
+        Assertions.assertNotNull(result, "No result: " + response);
+        Assertions.assertTrue(result.isOptimal());
+        Assertions.assertEquals(20.0, result.getValue().doubleValue(), TOLERANCE);
     }
 
     @Test
@@ -66,7 +91,7 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
@@ -97,7 +122,7 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         // Period 1: STM1 is real (not integer)
         OptVariable.RealVariable stm1 = model.newRealVariable("STM1");
@@ -190,7 +215,7 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         double[] costs = { 0.69, 0.64, 0.71, 0.79, 1.70, 2.83, 1.01, 0.75, 0.88, 0.59, 1.50, 2.63, 1.05, 1.06, 1.08, 0.64, 1.22, 2.37, 1.94, 1.50, 1.56, 1.22,
                 1.98, 1.98 };
@@ -276,16 +301,6 @@ public class OptClientV1Test extends AbstractTest {
         System.out.println(client.getServiceEnvironment());
     }
 
-    @Test
-    public void testOptimisationClient() {
-
-        OptClientV1 client = new OptClientV1(URI.create(HOST));
-
-        Assertions.assertTrue(client.isServiceAvailable());
-
-        System.out.println(client.getServiceEnvironment());
-    }
-
     /**
      * Binary knapsack problem from MIPLIB. 86 binary variables, 45 constraints. Known optimal: 11
      */
@@ -303,9 +318,9 @@ public class OptClientV1Test extends AbstractTest {
     }
 
     /**
-     * Prints what the deployed service says about itself – which build it is, what it is running on, what its
-     * licence permits, and which solvers it has. Run this to see what is actually deployed; the build section
-     * is the only thing that differs between builds.
+     * Prints what the service says about itself – which build it is, what it is running on, what its licence
+     * permits, which solvers it has, and how many solves it runs at once. Run this to see what you are talking
+     * to.
      */
     @Test
     public void testServiceEnvironment() {
@@ -321,18 +336,21 @@ public class OptClientV1Test extends AbstractTest {
     }
 
     /**
-     * Without a licence key a server rejects models with more than 1,000 variables, or fewer where it is set
-     * lower – 100 on the public test server. Submitting one should return immediately with a failed (not
-     * feasible) result.
+     * A model above the server's size limit is refused: it comes back at once with a result that is not
+     * feasible, rather than being solved. The limit is read from the licence the server reports – 1,000
+     * variables or constraints without a licence key. A licensed server reports none, so there this skips.
      */
     @Test
     public void testTooManyVariables() throws InterruptedException, ExecutionException {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        int limit = OptClientV1Test.reportedSizeLimit(client.getServiceEnvironment());
+        Assumptions.assumeTrue(limit > 0, "This server reports no size limit, so there is none to exceed");
 
-        OptVariable[] vars = new OptVariable[1_001];
+        OptModel model = client.newModel();
+
+        OptVariable[] vars = new OptVariable[limit + 1];
         for (int i = 0; i < vars.length; i++) {
             vars[i] = model.newRealVariable("X" + i).lower(0);
         }
@@ -346,12 +364,23 @@ public class OptClientV1Test extends AbstractTest {
         Assertions.assertFalse(result.isOptimal());
     }
 
+    /**
+     * The size limit in the licence description the server reports – "max 1000 variables/constraints", or
+     * "max size: 1000" – or 0 if it reports none.
+     */
+    private static int reportedSizeLimit(final String environment) {
+
+        Matcher matcher = Pattern.compile("max (?:size: )?([0-9]+)(?= variables|,|\\))").matcher(environment);
+
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
+    }
+
     @Test
     public void testVeryBasicModel() throws InterruptedException, ExecutionException {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
