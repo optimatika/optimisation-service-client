@@ -31,18 +31,18 @@ public class MaximumFlowTest {
         OptClientV1 client = AbstractTest.newOptClientV1();
         OptModel model = client.newModel();
 
-        OptVariable fSA = model.newRealVariable("sa").upper(10);
-        OptVariable fSB = model.newRealVariable("sb").upper(8);
-        OptVariable fAT = model.newRealVariable("at").upper(5);
-        OptVariable fAB = model.newRealVariable("ab").upper(3);
-        OptVariable fBT = model.newRealVariable("bt").upper(7);
+        OptVariable fSA = model.newRealVariable("sa").lower(0).upper(10);
+        OptVariable fSB = model.newRealVariable("sb").lower(0).upper(8);
+        OptVariable fAT = model.newRealVariable("at").lower(0).upper(5);
+        OptVariable fAB = model.newRealVariable("ab").lower(0).upper(3);
+        OptVariable fBT = model.newRealVariable("bt").lower(0).upper(7);
 
         // Flow conservation at interior nodes
         model.newConstraint("nodeA").set(fSA, 1).set(fAT, -1).set(fAB, -1).level(0);
         model.newConstraint("nodeB").set(fSB, 1).set(fAB, 1).set(fBT, -1).level(0);
 
         // Maximize total flow leaving the source
-        model.objective().set(fSA, 1).set(fSB, 1);
+        model.getObjective().set(fSA, 1).set(fSB, 1);
 
         OptResult result = model.maximise().get();
 

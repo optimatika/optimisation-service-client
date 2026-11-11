@@ -32,13 +32,13 @@ public class DietProblemTest {
         OptClientV1 client = AbstractTest.newOptClientV1();
         OptModel model = client.newModel();
 
-        OptVariable oatmeal = model.newRealVariable("oatmeal");
-        OptVariable chicken = model.newRealVariable("chicken");
+        OptVariable oatmeal = model.newRealVariable("oatmeal").lower(0);
+        OptVariable chicken = model.newRealVariable("chicken").lower(0);
 
         model.newConstraint("protein").set(oatmeal, 1).set(chicken, 2).lower(12);
         model.newConstraint("calories").set(oatmeal, 10).set(chicken, 5).lower(60);
 
-        model.objective().set(oatmeal, 2).set(chicken, 3);
+        model.getObjective().set(oatmeal, 2).set(chicken, 3);
 
         OptResult result = model.minimise().get();
 

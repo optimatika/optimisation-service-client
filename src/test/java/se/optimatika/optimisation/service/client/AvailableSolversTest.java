@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
  * {@link OptClientV1#isServiceAvailable()} turns on this count, so a miscount is the difference between a
  * usable deployment reported as unavailable and an unusable one reported as ready.
  */
-public class AvailableSolversTest extends AbstractTest {
+public class AvailableSolversTest {
 
     private static final String REALISTIC = "{\"build\":{\"module\":\"gcp\",\"built\":\"2026-08-01T05:42:25Z\",\"commit\":\"74fd4f6\","
             + "\"branch\":\"develop\",\"dirty\":\"false\"},\"runtime\":\"123MB/2threads x86_64\",\"licence\":\"Marketplace (unrestricted)\","

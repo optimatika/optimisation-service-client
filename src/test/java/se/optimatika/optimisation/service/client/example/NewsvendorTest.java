@@ -43,13 +43,13 @@ public class NewsvendorTest {
         double probability = 0.2;
         int[] demands = { 100, 150, 200, 250, 300 };
 
-        OptVariable q = model.newRealVariable("q");
+        OptVariable q = model.newRealVariable("q").lower(0);
 
         OptVariable[] excess = new OptVariable[5];
         OptVariable[] shortage = new OptVariable[5];
         for (int k = 0; k < 5; k++) {
-            excess[k] = model.newRealVariable("excess" + k);
-            shortage[k] = model.newRealVariable("shortage" + k);
+            excess[k] = model.newRealVariable("excess" + k).lower(0);
+            shortage[k] = model.newRealVariable("shortage" + k).lower(0);
         }
 
         for (int k = 0; k < 5; k++) {
@@ -57,7 +57,7 @@ public class NewsvendorTest {
         }
 
         // Maximize: (price - cost) * q - (price - salvage) * prob * sum(excess)
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         obj.set(q, sellingPrice - unitCost);
         for (int k = 0; k < 5; k++) {
             obj.set(excess[k], -(sellingPrice - salvageValue) * probability);

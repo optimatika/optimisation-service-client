@@ -7,11 +7,27 @@ import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Solves models on a real Optimisation Service – Optimatika's shared instance unless {@code SERVICE_HOST}
+ * names another (see {@link AbstractTest}) – through both {@link OptModel} and {@link OptClientV1} directly,
+ * with models built in code and read from MPS files.
+ */
+@Tag("integration")
 public class OptClientV1Test extends AbstractTest {
+
+    /**
+     * Objective values are compared within this, not exactly: the last digits depend on how many threads the
+     * server gives the solver.
+     */
+    private static final double TOLERANCE = 1E-6;
 
     private static byte[] readResource(final String path) throws IOException {
         try (InputStream is = ClassLoader.getSystemResourceAsStream(path)) {
@@ -37,22 +53,38 @@ public class OptClientV1Test extends AbstractTest {
         return response;
     }
 
+    /**
+     * The lower layer on its own: a model exported as EBM, submitted with
+     * {@link OptClientV1#putOnQueueParsed}, and polled for with {@link OptClientV1#pollResultParsed} until it
+     * is done.
+     */
     @Test
     public void testClientPutOnQueueAndPollResult() throws Exception {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
 
         model.newConstraint("UM2").set(varA, 1).set(varB, 1).level(2);
 
-        model.objective().set(varA, 10).set(varB, -10);
+        model.getObjective().set(varA, 10).set(varB, -10);
 
         Map<String, Object> response = client.putOnQueueParsed(model.exportModel("EBM").readAllBytes(), "EBM", true);
-        Assertions.assertTrue(response.containsKey(OptClientV1.KEY));
+        String key = (String) response.get(OptClientV1.KEY);
+        Assertions.assertNotNull(key, "No key: " + response);
+
+        for (int attempt = 0; attempt < 100 && "PENDING".equals(response.get(OptClientV1.STATUS)); attempt++) {
+            Thread.sleep(100L);
+            response = client.pollResultParsed(key);
+        }
+
+        OptResult result = (OptResult) response.get(OptClientV1.RESULT);
+        Assertions.assertNotNull(result, "No result: " + response);
+        Assertions.assertTrue(result.isOptimal());
+        Assertions.assertEquals(20.0, result.getValue().doubleValue(), TOLERANCE);
     }
 
     @Test
@@ -60,14 +92,14 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
 
         model.newConstraint("UM2").set(varA, 1).set(varB, 1).level(2);
 
-        model.objective().set(varA, 10).set(varB, -10);
+        model.getObjective().set(varA, 10).set(varB, -10);
 
         byte[] ebm = model.exportModel("EBM").readAllBytes();
         Assertions.assertTrue(ebm.length > 0);
@@ -91,40 +123,40 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         // Period 1: STM1 is real (not integer)
-        OptVariable.RealVariable stm1 = model.newRealVariable("STM1");
-        OptVariable.IntegerVariable anm1 = model.newIntegerVariable("ANM1").upper(18);
-        OptVariable.RealVariable ue1 = model.newRealVariable("UE1");
+        OptVariable.RealVariable stm1 = model.newRealVariable("STM1").lower(0);
+        OptVariable.IntegerVariable anm1 = model.newIntegerVariable("ANM1").lower(0).upper(18);
+        OptVariable.RealVariable ue1 = model.newRealVariable("UE1").lower(0);
 
         // Periods 2-6: STM is integer with bounds [57,75]
         OptVariable.IntegerVariable stm2 = model.newIntegerVariable("STM2").lower(57).upper(75);
-        OptVariable.IntegerVariable anm2 = model.newIntegerVariable("ANM2").upper(18);
-        OptVariable.RealVariable ue2 = model.newRealVariable("UE2");
+        OptVariable.IntegerVariable anm2 = model.newIntegerVariable("ANM2").lower(0).upper(18);
+        OptVariable.RealVariable ue2 = model.newRealVariable("UE2").lower(0);
 
         OptVariable.IntegerVariable stm3 = model.newIntegerVariable("STM3").lower(57).upper(75);
-        OptVariable.IntegerVariable anm3 = model.newIntegerVariable("ANM3").upper(18);
-        OptVariable.RealVariable ue3 = model.newRealVariable("UE3");
+        OptVariable.IntegerVariable anm3 = model.newIntegerVariable("ANM3").lower(0).upper(18);
+        OptVariable.RealVariable ue3 = model.newRealVariable("UE3").lower(0);
 
         OptVariable.IntegerVariable stm4 = model.newIntegerVariable("STM4").lower(57).upper(75);
-        OptVariable.IntegerVariable anm4 = model.newIntegerVariable("ANM4").upper(18);
-        OptVariable.RealVariable ue4 = model.newRealVariable("UE4");
+        OptVariable.IntegerVariable anm4 = model.newIntegerVariable("ANM4").lower(0).upper(18);
+        OptVariable.RealVariable ue4 = model.newRealVariable("UE4").lower(0);
 
         OptVariable.IntegerVariable stm5 = model.newIntegerVariable("STM5").lower(57).upper(75);
-        OptVariable.IntegerVariable anm5 = model.newIntegerVariable("ANM5").upper(18);
-        OptVariable.RealVariable ue5 = model.newRealVariable("UE5");
+        OptVariable.IntegerVariable anm5 = model.newIntegerVariable("ANM5").lower(0).upper(18);
+        OptVariable.RealVariable ue5 = model.newRealVariable("UE5").lower(0);
 
         OptVariable.IntegerVariable stm6 = model.newIntegerVariable("STM6").lower(57).upper(75);
-        OptVariable.IntegerVariable anm6 = model.newIntegerVariable("ANM6").upper(18);
-        OptVariable.RealVariable ue6 = model.newRealVariable("UE6");
+        OptVariable.IntegerVariable anm6 = model.newIntegerVariable("ANM6").lower(0).upper(18);
+        OptVariable.RealVariable ue6 = model.newRealVariable("UE6").lower(0);
 
         OptVariable[] stm = { stm1, stm2, stm3, stm4, stm5, stm6 };
         OptVariable[] anm = { anm1, anm2, anm3, anm4, anm5, anm6 };
         OptVariable[] ue = { ue1, ue2, ue3, ue4, ue5, ue6 };
 
         // Objective: minimize cost
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int i = 0; i < 6; i++) {
             obj.set(stm[i], 2700);
             obj.set(anm[i], 1500);
@@ -184,7 +216,7 @@ public class OptClientV1Test extends AbstractTest {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         double[] costs = { 0.69, 0.64, 0.71, 0.79, 1.70, 2.83, 1.01, 0.75, 0.88, 0.59, 1.50, 2.63, 1.05, 1.06, 1.08, 0.64, 1.22, 2.37, 1.94, 1.50, 1.56, 1.22,
                 1.98, 1.98 };
@@ -200,14 +232,13 @@ public class OptClientV1Test extends AbstractTest {
         OptVariable.BinaryVariable[] y = new OptVariable.BinaryVariable[24];
 
         for (int i = 0; i < 24; i++) {
-            x[i] = model.newRealVariable("X" + i);
-            // real variables default to lower=0, no upper
+            x[i] = model.newRealVariable("X" + i).lower(0);
         }
         for (int i = 0; i < 24; i++) {
             y[i] = model.newBinaryVariable("Y" + i);
         }
 
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int i = 0; i < 24; i++) {
             obj.set(x[i], costs[i]);
             obj.set(y[i], fixedCosts[i]);
@@ -241,7 +272,7 @@ public class OptClientV1Test extends AbstractTest {
 
         Assertions.assertTrue(result.isFeasible());
         Assertions.assertTrue(result.isOptimal());
-        Assertions.assertTrue(new BigDecimal("202.35").compareTo(result.getValue()) == 0);
+        Assertions.assertEquals(202.35, result.getValue().doubleValue(), TOLERANCE);
     }
 
     /**
@@ -256,22 +287,12 @@ public class OptClientV1Test extends AbstractTest {
         Map<String, Object> response = OptClientV1Test.solveViaMps(client, "optimisation/MIPLIB/gr4x6.mps", false);
         OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
-        Assertions.assertEquals(0, new BigDecimal("202.35").compareTo(result.getValue()));
+        Assertions.assertEquals(202.35, result.getValue().doubleValue(), TOLERANCE);
         Assertions.assertNotNull(result.getSolution());
     }
 
     @Test
     public void testIsServiceAvailable() {
-
-        OptClientV1 client = new OptClientV1(URI.create(HOST));
-
-        Assertions.assertTrue(client.isServiceAvailable());
-
-        System.out.println(client.getServiceEnvironment());
-    }
-
-    @Test
-    public void testOptimisationClient() {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
@@ -292,14 +313,14 @@ public class OptClientV1Test extends AbstractTest {
         OptResult result = (OptResult) response.get(OptClientV1.RESULT);
 
         Assertions.assertTrue(result.isFeasible());
-        Assertions.assertTrue(result.getValue().compareTo(new BigDecimal("11")) >= 0);
+        Assertions.assertTrue(result.getValue().doubleValue() >= 11.0 - TOLERANCE, () -> "Below the optimum: " + result.getValue());
         Assertions.assertNotNull(result.getSolution());
     }
 
     /**
-     * Prints what the deployed service says about itself – which build it is, what it is running on, what its
-     * licence permits, and which solvers it has. Run this to see what is actually deployed; the build section
-     * is the only thing that differs between builds.
+     * Prints what the service says about itself – which build it is, what it is running on, what its licence
+     * permits, which solvers it has, and how many solves it runs at once. Run this to see what you are
+     * talking to.
      */
     @Test
     public void testServiceEnvironment() {
@@ -315,22 +336,26 @@ public class OptClientV1Test extends AbstractTest {
     }
 
     /**
-     * The test server rejects models with more than 100 variables. Submitting one should return immediately
-     * with a failed (not feasible) result.
+     * A model above the server's size limit is refused: it comes back at once with a result that is not
+     * feasible, rather than being solved. The limit is read from the licence the server reports – 1,000
+     * variables or constraints without a licence key. A licensed server reports none, so there this skips.
      */
     @Test
     public void testTooManyVariables() throws InterruptedException, ExecutionException {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        int limit = OptClientV1Test.reportedSizeLimit(client.getServiceEnvironment());
+        Assumptions.assumeTrue(limit > 0, "This server reports no size limit, so there is none to exceed");
 
-        OptVariable[] vars = new OptVariable[101];
+        OptModel model = client.newModel();
+
+        OptVariable[] vars = new OptVariable[limit + 1];
         for (int i = 0; i < vars.length; i++) {
             vars[i] = model.newRealVariable("X" + i).lower(0);
         }
 
-        model.objective().set(vars[0], 1);
+        model.getObjective().set(vars[0], 1);
 
         Future<OptResult> future = model.minimise();
         OptResult result = future.get();
@@ -339,19 +364,30 @@ public class OptClientV1Test extends AbstractTest {
         Assertions.assertFalse(result.isOptimal());
     }
 
+    /**
+     * The size limit in the licence description the server reports – "max 1000 variables/constraints", or
+     * "max size: 1000" – or 0 if it reports none.
+     */
+    private static int reportedSizeLimit(final String environment) {
+
+        Matcher matcher = Pattern.compile("max (?:size: )?([0-9]+)(?= variables|,|\\))").matcher(environment);
+
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
+    }
+
     @Test
     public void testVeryBasicModel() throws InterruptedException, ExecutionException {
 
         OptClientV1 client = new OptClientV1(URI.create(HOST));
 
-        OptModel model = new OptModel(client);
+        OptModel model = client.newModel();
 
         OptVariable varA = model.newRealVariable("A").lower(0);
         OptVariable varB = model.newRealVariable("B").lower(0);
 
         model.newConstraint("UM2").set(varA, 1).set(varB, 1).level(2);
 
-        model.objective().set(varA, 10).set(varB, -10);
+        model.getObjective().set(varA, 10).set(varB, -10);
 
         Assertions.assertTrue(model.maximise().get().isOptimal());
         Assertions.assertEquals(2.0, varA.doubleValue());

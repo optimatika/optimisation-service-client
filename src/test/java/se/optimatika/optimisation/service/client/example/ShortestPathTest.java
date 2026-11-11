@@ -31,13 +31,13 @@ public class ShortestPathTest {
         OptClientV1 client = AbstractTest.newOptClientV1();
         OptModel model = client.newModel();
 
-        OptVariable f01 = model.newRealVariable("f01");
-        OptVariable f02 = model.newRealVariable("f02");
-        OptVariable f13 = model.newRealVariable("f13");
-        OptVariable f14 = model.newRealVariable("f14");
-        OptVariable f23 = model.newRealVariable("f23");
-        OptVariable f24 = model.newRealVariable("f24");
-        OptVariable f34 = model.newRealVariable("f34");
+        OptVariable f01 = model.newRealVariable("f01").lower(0);
+        OptVariable f02 = model.newRealVariable("f02").lower(0);
+        OptVariable f13 = model.newRealVariable("f13").lower(0);
+        OptVariable f14 = model.newRealVariable("f14").lower(0);
+        OptVariable f23 = model.newRealVariable("f23").lower(0);
+        OptVariable f24 = model.newRealVariable("f24").lower(0);
+        OptVariable f34 = model.newRealVariable("f34").lower(0);
 
         // Source emits 1 unit of flow
         model.newConstraint("source").set(f01, 1).set(f02, 1).level(1);
@@ -47,7 +47,7 @@ public class ShortestPathTest {
         model.newConstraint("node2").set(f02, 1).set(f23, -1).set(f24, -1).level(0);
         model.newConstraint("node3").set(f13, 1).set(f23, 1).set(f34, -1).level(0);
 
-        model.objective().set(f01, 4).set(f02, 2).set(f13, 3).set(f14, 7).set(f23, 1).set(f24, 8).set(f34, 2);
+        model.getObjective().set(f01, 4).set(f02, 2).set(f13, 3).set(f14, 7).set(f23, 1).set(f24, 8).set(f34, 2);
 
         OptResult result = model.minimise().get();
 

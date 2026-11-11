@@ -20,16 +20,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * Builder for optimisation models that are solved remotely via optimisation-service-server.
+ * Builder for optimisation models that are solved remotely, by the Optimisation Service.
  * <p>
  * Use the factory methods to create variables ({@link #newRealVariable}, {@link #newIntegerVariable},
  * {@link #newBinaryVariable}), define constraints ({@link #newConstraint}), and set the objective function
- * ({@link #objective()}). Then call {@link #maximise()} or {@link #minimise()} to submit the model to the
+ * ({@link #getObjective()}). Then call {@link #maximise()} or {@link #minimise()} to submit the model to the
  * server and obtain a {@link Future} that completes with the {@link OptResult}.
  * <p>
  * The model is serialised to the EBM (Expression-Based Model) format and sent to the server via
@@ -78,8 +79,20 @@ public final class OptModel {
      * <p>
      * Cancelling before the model has even been submitted works too: the abort is sent as soon as the server
      * hands back a key.
+     * <p>
+     * The abort is sent in the background, so {@link #cancel(boolean)} does not wait for it. On a service
+     * that runs as several instances it can reach one that does not know the solve. It is then sent again,
+     * after 1 s, 2 s, 4 s and so on, at most 2 minutes apart, until the instance solving it answers, for at
+     * most 10 minutes. If none of them gets there, a warning is logged, and the solve runs on until it
+     * finishes or reaches its time limit. The model is never submitted again.
      */
-    private static final class RemoteSolve extends CompletableFuture<OptResult> {
+    static final class RemoteSolve extends CompletableFuture<OptResult> {
+
+        private static final System.Logger LOGGER = System.getLogger(OptModel.class.getName());
+        static final long ABORT_FIRST_GAP_MILLIS = 1_000L;
+        static final long ABORT_GIVE_UP_MILLIS = 600_000L;
+
+        static final long ABORT_MAX_GAP_MILLIS = 120_000L;
 
         private final AtomicBoolean myAbortSent = new AtomicBoolean(false);
         private volatile boolean myAbortWanted = false;
@@ -125,8 +138,63 @@ public final class OptModel {
             String key = myKey;
 
             if (myAbortWanted && key != null && myAbortSent.compareAndSet(false, true)) {
-                myClient.abortParsed(key);
+                Thread aborter = new Thread(() -> this.abortUntilAnswered(key), "optimisation-abort-" + key);
+                aborter.setDaemon(true);
+                aborter.start();
             }
+        }
+
+        /**
+         * Sends the abort until the instance solving it answers, with growing gaps, or gives up. Only that
+         * instance answers with the solve's status, {@code DONE}: it knows the solve, finished or not.
+         * Another answers 404, and an overloaded service may answer with an error of its own.
+         */
+        private void abortUntilAnswered(final String key) {
+
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ABORT_GIVE_UP_MILLIS);
+            long gap = ABORT_FIRST_GAP_MILLIS;
+            int attempts = 0;
+
+            while (true) {
+
+                attempts++;
+
+                try {
+                    String answer = myClient.abort(key);
+                    if (answer != null && answer.contains("\"status\":\"DONE\"")) {
+                        return;
+                    }
+                } catch (IOException cause) {
+                    // Not sent, or no answer. Tried again like a miss.
+                } catch (InterruptedException cause) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+
+                if (System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(gap) > deadline) {
+                    LOGGER.log(System.Logger.Level.WARNING,
+                            "The abort of {0} did not reach the service instance solving it, in {1} attempts. It runs on until it finishes or reaches its time limit.",
+                            key, attempts);
+                    return;
+                }
+
+                try {
+                    Thread.sleep(gap);
+                } catch (InterruptedException cause) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+
+                gap = Math.min(2L * gap, ABORT_MAX_GAP_MILLIS);
+            }
+        }
+
+        /**
+         * The queue key, once the server has handed it back – null until then. Not public: a solve started
+         * here is followed and cancelled through the {@link Future}, and this is for this package's tests.
+         */
+        String key() {
+            return myKey;
         }
 
         void setKey(final String key) {
@@ -258,11 +326,20 @@ public final class OptModel {
     }
 
     /**
+     * Returns this model's objective function. Each model has exactly one objective. Whether it is minimised
+     * or maximised is decided when solving, by {@link #minimise()} or {@link #maximise()}.
+     */
+    public OptObjective getObjective() {
+        return myObjective;
+    }
+
+    /**
      * Submits this model to the server for maximisation and returns a {@link Future} that completes with the
      * {@link OptResult}. On completion, solution values are written back to the variables.
      * <p>
      * Calling {@code cancel(true)} on the returned {@link Future} abandons the solve on the server as well as
-     * locally. See {@link #minimise()} for what the flag decides.
+     * locally. See {@link #minimise()} for what the flag decides, and for when the {@link Future} completes
+     * exceptionally.
      */
     public Future<OptResult> maximise() {
         return this.optimise(true);
@@ -276,13 +353,22 @@ public final class OptModel {
      * far that reaches:
      * <ul>
      * <li>{@code cancel(true)} also aborts the solve on the server, freeing the worker it occupies for the
-     * next model in the queue. Use this for a solve that is taking longer than you are willing to wait.</li>
+     * next model in the queue. Use this for a solve that is taking longer than you are willing to wait. The
+     * abort is sent in the background, and sent again for up to 10 minutes if it reaches a service instance
+     * other than the one solving the model; if none gets there, a warning is logged.</li>
      * <li>{@code cancel(false)} abandons only the local side. Polling stops and the {@link Future} reports
      * cancelled, but the server keeps solving, and since the queue key is not exposed here that solve cannot
      * be reached again.</li>
      * </ul>
      * Either way the {@link Future} never completes with a result, and solution values are not written back
      * to the variables.
+     * <p>
+     * The {@link Future} completes exceptionally – {@code get()} throws an {@code ExecutionException} with an
+     * {@link IOException} as its cause – when the service cannot be reached or does not answer in time,
+     * answers with an error (429 when its queue is full, say), does not accept the model, or no longer knows
+     * the solve: it has expired, or a reconnect reached another instance of the service. The
+     * model is not submitted again; that is the caller's decision. A model the service refuses, for its size
+     * say, completes normally, with a result that is not feasible.
      */
     public Future<OptResult> minimise() {
         return this.optimise(false);
@@ -347,10 +433,12 @@ public final class OptModel {
     }
 
     /**
-     * Returns this model's objective function. Each model has exactly one objective.
+     * @deprecated Use {@link #getObjective()}, named as in ojAlgo's {@code ExpressionsBasedModel}. To be
+     *             removed in 2.0.
      */
+    @Deprecated(since = "1.1.0", forRemoval = true)
     public OptObjective objective() {
-        return myObjective;
+        return this.getObjective();
     }
 
     @Override
@@ -520,13 +608,16 @@ public final class OptModel {
                 }
 
                 // Deliberately not interruptible. An interrupt here would surface as an InterruptedException
-                // out of the HTTP send, which putOnQueueParsed reports as a response with no key – and the
-                // request may well have reached the server all the same. There would then be a solve running
-                // that nothing could name, let alone abort. So a cancellation arriving during submission is
-                // recorded and acted on below rather than thrown at this call.
-                Map<String, Object> response = myClient.putOnQueueParsed(this.toBytesOfEBM(), "EBM", maximize);
+                // out of the HTTP send – and the request may well have reached the server all the same. There
+                // would then be a solve running that nothing could name, let alone abort. So a cancellation
+                // arriving during submission is recorded and acted on below rather than thrown at this call.
+                Map<String, Object> response = OptClientV1.parseResponse(myClient.putOnQueue(this.toBytesOfEBM(), "EBM", maximize));
                 String key = (String) response.get(OptClientV1.KEY);
                 String status = (String) response.get(OptClientV1.STATUS);
+
+                if (key == null) {
+                    throw new IOException("The service did not accept the model: " + response);
+                }
 
                 // Hands the key over before the first poll, so that a cancellation that arrived while the
                 // model was in flight has something to abort, and sends that abort now.
@@ -550,12 +641,25 @@ public final class OptModel {
                         return;
                     }
 
-                    response = myClient.pollResultParsed(key);
+                    // An IOException – the service could not be reached, or no longer knows the solve – ends
+                    // the Future exceptionally, below. Resubmitting is the caller's decision, not this one's.
+                    try {
+                        response = OptClientV1.parseResponse(myClient.pollResult(key));
+                    } catch (InterruptedException cause) {
+                        if (future.isCancelled()) {
+                            return;
+                        }
+                        throw cause;
+                    }
                     status = (String) response.get(OptClientV1.STATUS);
                 }
 
                 if (future.isCancelled()) {
                     return;
+                }
+
+                if (!"DONE".equals(status)) {
+                    throw new IOException("Unexpected answer from the service about " + key + ": " + response);
                 }
 
                 OptResult result = this.handleResult(response);

@@ -7,6 +7,10 @@ import java.math.BigDecimal;
  * {@link OptModel} ({@link OptModel#newRealVariable()}, {@link OptModel#newIntegerVariable()},
  * {@link OptModel#newBinaryVariable()}). After optimisation, the solution value is available through
  * {@link #getValue()} and the typed accessors ({@link #doubleValue()}, {@link #intValue()}, etc.).
+ * <p>
+ * Real and integer variables are free when created – no lower and no upper bound – as in ojAlgo's
+ * {@code ExpressionsBasedModel}. A bound that is {@code null} is no bound. A binary variable is always
+ * between 0 and 1.
  */
 public abstract class OptVariable extends OptEntity {
 
@@ -39,12 +43,18 @@ public abstract class OptVariable extends OptEntity {
 
         IntegerVariable(final String name, final int index) {
             super(name, index, true);
-            this.lower(BigDecimal.ZERO);
         }
 
+        /**
+         * @param lower the lower bound, rounded to a whole number, or {@code null} for none
+         */
         @Override
         public IntegerVariable lower(final BigDecimal lower) {
-            return this.lower(OptModel.longValue(lower));
+            if (lower == null) {
+                return (IntegerVariable) super.lower(null);
+            } else {
+                return this.lower(OptModel.longValue(lower));
+            }
         }
 
         public IntegerVariable lower(final long lower) {
@@ -52,9 +62,16 @@ public abstract class OptVariable extends OptEntity {
             return this;
         }
 
+        /**
+         * @param upper the upper bound, rounded to a whole number, or {@code null} for none
+         */
         @Override
         public IntegerVariable upper(final BigDecimal upper) {
-            return this.upper(OptModel.longValue(upper));
+            if (upper == null) {
+                return (IntegerVariable) super.upper(null);
+            } else {
+                return this.upper(OptModel.longValue(upper));
+            }
         }
 
         public IntegerVariable upper(final long upper) {
@@ -78,7 +95,6 @@ public abstract class OptVariable extends OptEntity {
 
         RealVariable(final String name, final int index) {
             super(name, index, false);
-            this.lower(BigDecimal.ZERO);
         }
 
         @Override

@@ -47,7 +47,7 @@ public class KnapsackTest {
         }
         weightLimit.upper(capacity);
 
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int i = 0; i < 6; i++) {
             obj.set(items[i], values[i]);
         }

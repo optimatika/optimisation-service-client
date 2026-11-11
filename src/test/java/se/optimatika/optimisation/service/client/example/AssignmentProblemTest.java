@@ -67,7 +67,7 @@ public class AssignmentProblemTest {
             c.level(1);
         }
 
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 4; j++) {
                 obj.set(x[i][j], cost[i][j]);

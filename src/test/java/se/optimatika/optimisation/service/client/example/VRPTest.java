@@ -66,7 +66,7 @@ public class VRPTest {
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
                 if (i != j) {
-                    f[i][j] = model.newRealVariable("f" + i + "_" + j);
+                    f[i][j] = model.newRealVariable("f" + i + "_" + j).lower(0);
                 }
             }
         }
@@ -127,7 +127,7 @@ public class VRPTest {
             }
         }
 
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
                 if (i != j) {

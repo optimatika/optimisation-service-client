@@ -7,7 +7,7 @@ import java.util.Map;
  * The objective function of the optimisation model. Set linear coefficients with
  * {@link #set(OptVariable, BigDecimal)}, quadratic coefficients with
  * {@link #set(OptVariable, OptVariable, BigDecimal)}, and an optional constant term with {@link #constant}.
- * Each model has exactly one objective, obtained via {@link OptModel#objective()}.
+ * Each model has exactly one objective, obtained via {@link OptModel#getObjective()}.
  */
 public final class OptObjective extends OptExpression {
 

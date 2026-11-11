@@ -75,7 +75,7 @@ public class BinPackingTest {
             model.newConstraint("sym" + j).set(y[j], 1).set(y[j + 1], -1).lower(0);
         }
 
-        OptObjective obj = model.objective();
+        OptObjective obj = model.getObjective();
         for (int j = 0; j < nBins; j++) {
             obj.set(y[j], 1);
         }
