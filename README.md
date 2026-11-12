@@ -21,7 +21,7 @@ The client needs a service to talk to. Optimatika's shared instance, `https://se
 <dependency>
     <groupId>se.optimatika</groupId>
     <artifactId>optimisation-service-client</artifactId>
-    <version>1.1.0</version>
+    <version>X.Y.Z</version>
 </dependency>
 ```
 
