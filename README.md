@@ -203,6 +203,10 @@ java -cp target/classes:target/test-classes se.optimatika.optimisation.service.c
 
 Set `OPTIMATIKA_LICENCE_KEY` instead of giving the key, to keep it out of your shell's history.
 
+## Support
+
+Bugs in the client, or in the Optimisation Service itself: [issues](https://github.com/optimatika/optimisation-service-client/issues) – open to everyone. Questions are answered as described in [SUPPORT.md](https://github.com/optimatika/.github/blob/master/SUPPORT.md). With a subscription, start a case through the [contact form](https://www.optimatika.se/contact/) instead.
+
 ## License
 
 This software is released into the public domain — see [UNLICENSE](UNLICENSE).
