@@ -34,7 +34,7 @@ failing to compile – see Changed and Deprecated below:
   the stream open, as Cloud Run does. Against a service that does not stream,
   each call is one request, as before.
 - **`OptModel.getObjective()`**, named as in ojAlgo's `ExpressionsBasedModel`,
-  which gets it in ojAlgo 58. It replaces `objective()`.
+  which gets it in ojAlgo 57.7.0 and 58. It replaces `objective()`.
 - **Reading an `OptResult` as ojAlgo's `Optimisation.Result`:** the objective
   function's value without an index, `doubleValue()`, `get()`, `intValue()`
   and so on, and the variables' values with one, `doubleValue(i)`, `get(i)`,
