@@ -11,7 +11,7 @@ public class AvailableSolversTest {
 
     private static final String REALISTIC = "{\"build\":{\"module\":\"gcp\",\"built\":\"2026-08-01T05:42:25Z\",\"commit\":\"74fd4f6\","
             + "\"branch\":\"develop\",\"dirty\":\"false\"},\"runtime\":\"123MB/2threads x86_64\",\"licence\":\"Marketplace (unrestricted)\","
-            + "\"solvers\":{\"probed\":true,\"available\":[\"LP-HiGHS\",\"LP-JVM\",\"MIQCQP-SCIP\",\"QCQP-Clarabel\"]}}";
+            + "\"solvers\":{\"verified\":true,\"available\":[\"LP-HiGHS\",\"LP-JVM\",\"MIQCQP-SCIP\",\"QCQP-Clarabel\"]}}";
 
     /**
      * The exact body a current server returns, captured from it rather than written by hand – this is the
@@ -22,7 +22,7 @@ public class AvailableSolversTest {
     public void testCapturedServerResponse() {
 
         String body = "{\"build\":{\"module\":\"unknown\",\"built\":\"unknown\",\"commit\":\"f482efe\",\"branch\":\"develop\",\"dirty\":\"true\"},"
-                + "\"runtime\":\"12GB/18threads aarch64 [48GB/18threads, 2MB/18threads, 256kB/1thread, 64kB/1thread]\",\"licence\":\"Marketplace (unrestricted)\",\"solvers\":{\"probed\":true,\"available\":[\"LP-Clarabel\",\"LP-HiGHS\",\"LP-JVM\",\"LP-SCIP\",\"MILP-HiGHS\",\"MILP-JVM\",\"MILP-SCIP\",\"MIQCLP-SCIP\",\"MIQCQP-SCIP\",\"MIQP-JVM\",\"MIQP-SCIP\",\"QCLP-Clarabel\",\"QCLP-SCIP\",\"QCQP-Clarabel\",\"QCQP-SCIP\",\"QP-Clarabel\",\"QP-HiGHS\",\"QP-JVM\",\"QP-SCIP\"]}}";
+                + "\"runtime\":\"12GB/18threads aarch64 [48GB/18threads, 2MB/18threads, 256kB/1thread, 64kB/1thread]\",\"licence\":\"Marketplace (unrestricted)\",\"solvers\":{\"verified\":true,\"available\":[\"LP-Clarabel\",\"LP-HiGHS\",\"LP-JVM\",\"LP-SCIP\",\"MILP-HiGHS\",\"MILP-JVM\",\"MILP-SCIP\",\"MIQCLP-SCIP\",\"MIQCQP-SCIP\",\"MIQP-JVM\",\"MIQP-SCIP\",\"QCLP-Clarabel\",\"QCLP-SCIP\",\"QCQP-Clarabel\",\"QCQP-SCIP\",\"QP-Clarabel\",\"QP-HiGHS\",\"QP-JVM\",\"QP-SCIP\"]}}";
 
         Assertions.assertEquals(19, OptClientV1.parseAvailableSolvers(body));
     }
@@ -43,18 +43,18 @@ public class AvailableSolversTest {
         Assertions.assertEquals(1, OptClientV1.parseAvailableSolvers(body));
     }
 
-    /** Still starting up: probing unfinished, but the built-in solvers are listed and they solve. */
+    /** Only the built-in solvers, as a deployment without the native ones lists them – they count. */
     @Test
-    public void testCountsWhileStillProbing() {
+    public void testCountsBuiltInOnly() {
 
-        String body = "{\"licence\":\"Standalone\",\"solvers\":{\"probed\":false,\"available\":[\"LP-JVM\",\"QP-JVM\",\"MILP-JVM\",\"MIQP-JVM\"]}}";
+        String body = "{\"licence\":\"Standalone\",\"solvers\":{\"verified\":false,\"available\":[\"LP-JVM\",\"QP-JVM\",\"MILP-JVM\",\"MIQP-JVM\"]}}";
 
         Assertions.assertEquals(4, OptClientV1.parseAvailableSolvers(body));
     }
 
     @Test
     public void testEmptyArrayCountsAsNone() {
-        Assertions.assertEquals(0, OptClientV1.parseAvailableSolvers("{\"solvers\":{\"probed\":true,\"available\":[]}}"));
+        Assertions.assertEquals(0, OptClientV1.parseAvailableSolvers("{\"solvers\":{\"verified\":true,\"available\":[]}}"));
     }
 
     /** The old plain-text environment response, and anything else that is not this document. */
@@ -75,7 +75,7 @@ public class AvailableSolversTest {
     public void testWordInsideAnotherFieldIsNotTheArray() {
 
         String body = "{\"runtime\":\"123MB/2threads x86_64 [512MB/2threads, 4MB/2threads]\","
-                + "\"licence\":\"no solvers available\",\"solvers\":{\"probed\":true,\"available\":[\"LP-JVM\",\"QP-JVM\"]}}";
+                + "\"licence\":\"no solvers available\",\"solvers\":{\"verified\":true,\"available\":[\"LP-JVM\",\"QP-JVM\"]}}";
 
         Assertions.assertEquals(2, OptClientV1.parseAvailableSolvers(body));
     }

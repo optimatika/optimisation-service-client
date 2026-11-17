@@ -543,8 +543,9 @@ public final class OptClientV1 {
      * the build it was packaged from, the runtime it is on (memory, threads, architecture), what its licence
      * permits, and which solvers it has.
      * <p>
-     * The solver list is what that deployment can actually do – it is deliberately not fixed across
-     * deployments, and {@code solvers.probed} is false while the server is still working it out.
+     * The solver list is what that deployment has – it is deliberately not fixed across deployments – each
+     * assumed to work until it turns out not to. {@code solvers.verified} is true when the list is what passed
+     * the server's solver self-test, which a request with {@code ?verify=true} runs.
      * <p>
      * Returns {@code "?"} if the server is unreachable.
      */

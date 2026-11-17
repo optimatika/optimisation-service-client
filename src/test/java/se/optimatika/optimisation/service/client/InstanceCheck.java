@@ -242,8 +242,8 @@ public final class InstanceCheck {
         InstanceCheck.info("Licence: " + environment.licence);
         InstanceCheck.info(environment.solvers + " solvers – " + (environment.nativeSolvers ? "the full suite" : "ojAlgo's own only"));
 
-        if ("false".equals(InstanceCheck.field(environment.json, "probed"))) {
-            InstanceCheck.info("It has only just started, and is still finding out which solvers work – run this again in a minute");
+        if ("true".equals(InstanceCheck.field(environment.json, "verified"))) {
+            InstanceCheck.info("Those solvers have passed the instance's self-test");
         }
 
         if (all) {
